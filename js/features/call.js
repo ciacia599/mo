@@ -518,6 +518,7 @@ html:not([data-theme="dark"])[data-color-theme="black-white"] .message-sent{
 
     function tick() {
         if (!S.active || !S.startTime) return;
+        if (document.hidden) { S.timerRAF = null; return; }
         S.elapsed = Date.now() - S.startTime;
         const t = fmt(S.elapsed);
         const a = document.getElementById('call-timer-display');
@@ -926,4 +927,10 @@ html:not([data-theme="dark"])[data-color-theme="black-white"] .message-sent{
     }
 
     init();
+
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden && S.active && S.startTime && !S.timerRAF) {
+            S.timerRAF = requestAnimationFrame(tick);
+        }
+    });
 })();

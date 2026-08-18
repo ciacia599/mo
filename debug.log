@@ -1,0 +1,10 @@
+[17520:1936:0818/170400.332:ERROR:rarecc_manager.cpp(923)] UserJsonFile::Load failed
+[17520:1936:0818/170400.332:ERROR:rarecc_manager.cpp(674)] Load rarecc.dat failed: 
+[17520:1936:0818/170400.352:WARNING:kernel_parameter_setter.cc(150)] [KernelParameterSetter] NotifyDoublePinyinSchemeChanged failed, scheme=Sogou status=1
+[17520:1936:0818/170400.352:WARNING:t_skinfilemap.cpp(56)] SGRenderLog:CheckUpdate newMem.OpenMem failed, szNewMem:Local\sgime_skin.v3.filemap.sogouime err:系统错误2: 系统找不到指定的文件。  
+打开Filemap失败: Local\sgime_skin.v3.filemap.sogouime4385964fa97
+[17520:1936:0818/170400.352:WARNING:t_skinfilemap.cpp(65)] SGRenderLog:CheckUpdate finish: old version:1
+[17520:1936:0818/170400.352:WARNING:t_skinfilemap.cpp(67)] SGRenderLog:CheckUpdate finish: new version:3
+[17520:1936:0818/170400.385:WARNING:t_skinfilemap.cpp(63)] SGRenderLog:CheckUpdate newMem.OpenMem Suc, szNewMem:Local\sgime_skin.Dpi144.v3.filemap.sogouime
+[17520:1936:0818/170400.385:WARNING:t_skinfilemap.cpp(65)] SGRenderLog:CheckUpdate finish: old version:3
+[17520:1936:0818/170400.385:WARNING:t_skinfilemap.cpp(67)] SGRenderLog:CheckUpdate finish: new version:3

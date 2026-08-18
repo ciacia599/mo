@@ -789,17 +789,23 @@ if (customIntros && customIntros.length > 0) {
 
 function manageAutoSendTimer() {
     if (autoSendTimer) {
-        clearInterval(autoSendTimer);
+        if (window.__PerfManager) window.__PerfManager.unregisterTimer(autoSendTimer);
+        else clearInterval(autoSendTimer);
         autoSendTimer = null;
     }
     if (settings.autoSendEnabled) {
         const intervalMs = settings.autoSendInterval * 60 * 1000;
         
-        autoSendTimer = setInterval(() => {
+        const tick = () => {
             if (!document.body.classList.contains('batch-favorite-mode')) {
                 simulateReply(); 
             }
-        }, intervalMs);
+        };
+        if (window.__PerfManager) {
+            autoSendTimer = window.__PerfManager.registerTimer(tick, intervalMs, 'interval');
+        } else {
+            autoSendTimer = setInterval(tick, intervalMs);
+        }
     }
 }
 
@@ -1057,8 +1063,14 @@ function createMessageFragment(msg, prevMsg, nextMsg, lastSenderRef) {
     }
 
     const isImageOnly = !msg.text && !!msg.image;
-    let content = msg.text ? `<div>${msg.text.replace(/\n/g, '<br>')}</div>` : '';
-    if (msg.image) content += `<img src="${msg.image}" class="message-image${isImageOnly ? ' message-image-only' : ''}" alt="图片" style="max-width:${isImageOnly ? '100px' : '100px'}; border-radius: 12px;${!isImageOnly ? ' margin-top: 6px;' : ''} cursor: pointer;" onclick="viewImage('${msg.image}')">`;
+    let content = '';
+    // 红包消息 → 渲染为微信风格红包卡片（可点击领取）
+    if (msg.type === 'redpacket' && msg.redpacketId && typeof window.exRedpacketCardHtml === 'function') {
+        content = window.exRedpacketCardHtml(msg.redpacketId);
+    } else {
+        content = msg.text ? `<div>${msg.text.replace(/\n/g, '<br>')}</div>` : '';
+        if (msg.image) content += `<img src="${msg.image}" class="message-image${isImageOnly ? ' message-image-only' : ''}" alt="图片" style="max-width:${isImageOnly ? '100px' : '100px'}; border-radius: 12px;${!isImageOnly ? ' margin-top: 6px;' : ''} cursor: pointer;" onclick="viewImage('${msg.image}')">`;
+    }
     messageHTML += content;
 
     const messageDiv = document.createElement('div');

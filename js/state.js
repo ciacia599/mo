@@ -179,3 +179,98 @@
                 closeBtn: document.getElementById('close-data')
             }
         };
+
+/* ============ 统一性能管理器：防发烫/防切后台退出 ============ */
+(function() {
+    const perfTimers = new Map();
+    let perfIdCounter = 0;
+    let perfPaused = false;
+    let perfHiddenAt = 0;
+
+    function makeWrapped(fn) {
+        return function() {
+            if (perfPaused) return;
+            const t = perfTimers.get(this._perfId);
+            if (t) t.lastRun = Date.now();
+            fn();
+        };
+    }
+
+    window.__PerfManager = {
+        registerTimer(fn, period, type) {
+            const id = 'pt_' + (++perfIdCounter);
+            let handle;
+            const wrapped = function() {
+                if (perfPaused) return;
+                const t = perfTimers.get(id);
+                if (t) t.lastRun = Date.now();
+                fn();
+            };
+            if (type === 'interval') {
+                handle = setInterval(wrapped, period);
+            } else if (type === 'timeout') {
+                handle = setTimeout(function() {
+                    perfTimers.delete(id);
+                    fn();
+                }, period);
+            } else if (type === 'raf') {
+                const tick = function() {
+                    const t = perfTimers.get(id);
+                    if (!t) return;
+                    if (!perfPaused) fn();
+                    if (perfTimers.has(id)) {
+                        t.handle = requestAnimationFrame(tick);
+                    }
+                };
+                handle = requestAnimationFrame(tick);
+            }
+            perfTimers.set(id, { type, handle, fn, wrapped, period, lastRun: Date.now(), suspended: false });
+            return id;
+        },
+        unregisterTimer(id) {
+            const t = perfTimers.get(id);
+            if (!t) return;
+            if (t.type === 'interval') clearInterval(t.handle);
+            else if (t.type === 'timeout') clearTimeout(t.handle);
+            else if (t.type === 'raf') cancelAnimationFrame(t.handle);
+            perfTimers.delete(id);
+        },
+        pauseAll() {
+            if (perfPaused) return;
+            perfPaused = true;
+            perfHiddenAt = Date.now();
+            perfTimers.forEach((t) => {
+                if (t.type === 'interval') {
+                    clearInterval(t.handle);
+                    t.suspended = true;
+                } else if (t.type === 'raf') {
+                    cancelAnimationFrame(t.handle);
+                    t.suspended = true;
+                }
+            });
+        },
+        resumeAll() {
+            if (!perfPaused) return;
+            perfPaused = false;
+            perfTimers.forEach((t, id) => {
+                if (t.suspended && t.type === 'interval') {
+                    t.handle = setInterval(t.wrapped, t.period);
+                    t.suspended = false;
+                } else if (t.suspended && t.type === 'raf') {
+                    const tick = function() {
+                        const tt = perfTimers.get(id);
+                        if (!tt) return;
+                        if (!perfPaused) tt.fn();
+                        if (perfTimers.has(id)) {
+                            tt.handle = requestAnimationFrame(tick);
+                        }
+                    };
+                    t.handle = requestAnimationFrame(tick);
+                    t.suspended = false;
+                }
+            });
+        },
+        get isPaused() { return perfPaused; },
+        get hiddenDuration() { return perfPaused ? Date.now() - perfHiddenAt : 0; }
+    };
+})();

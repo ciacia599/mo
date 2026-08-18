@@ -390,7 +390,7 @@ function xqApplyMove(from, to) {
 }
 
 function xqAnimTick() {
-    if (!xqActive) { xqAnim = null; return; }
+    if (!xqActive || document.hidden) { xqAnim = null; return; }
     xqDrawBoard();
     if (performance.now() - xqAnim.start < xqAnim.duration) {
         requestAnimationFrame(xqAnimTick);

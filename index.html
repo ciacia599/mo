@@ -23,7 +23,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/localforage/1.10.0/localforage.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 
-    <link rel="stylesheet" href="css/styles.css?v=4">
+    <link rel="stylesheet" href="css/styles.css?v=5">
 
     <style id="css-live-preview-style"></style>
 </head>
@@ -202,6 +202,8 @@
                 </div>
             </div>
             <div class="header-actions">
+                <button id="together-btn" class="action-btn" title="陪伴模式" onclick="try{if(typeof openTogetherMode==='function')openTogetherMode();else if(window.__showToast)window.__showToast('功能加载中，请稍后再试…','info');}catch(e){console.error(e);alert('陪伴模式启动失败：'+e.message)}"><i class="fas fa-heartbeat"></i></button>
+                <button id="space-btn" class="action-btn" title="空间" onclick="try{if(typeof openSpaceCenter==='function')openSpaceCenter();else if(window.__showToast)window.__showToast('功能加载中，请稍后再试…','info');}catch(e){console.error(e);alert('空间启动失败：'+e.message)}"><i class="fas fa-globe"></i></button>
                 <button id="session-manager-btn" class="action-btn" title="会话管理"><i class="fas fa-comments"></i></button>
                 <button id="group-chat-btn" class="action-btn" title="群聊设置"><i class="fas fa-users"></i></button>
                 <button id="daily-greeting-btn" class="action-btn" title="今日公告" onclick="reopenDailyGreeting()"><i class="fas fa-newspaper"></i></button>
@@ -2229,8 +2231,8 @@
     <script src="js/config.js"></script>
     <script src="js/utils.js"></script>
     <script src="js/backup-engine.js"></script>
-    <script src="js/state.js"></script>
-    <script src="js/core.js"></script>
+    <script src="js/state.js?v=2"></script>
+    <script src="js/core.js?v=6"></script>
 
     <!-- == 功能模块 == -->
     <script src="js/features/mood.js"></script>
@@ -2238,11 +2240,13 @@
     <script src="js/features/reply-library.js"></script>
     <script src="js/features/theme-editor.js"></script>
     <script src="js/features/group-chat.js"></script>
-    <script src="js/features/call.js"></script>
-    <script src="js/features/extras.js?v=3"></script>
+    <script src="js/features/call.js?v=2"></script>
+    <script src="js/features/extras.js?v=9"></script>
     <script src="js/features/mini-games.js?v=3"></script>
     <script src="js/features/doodle.js?v=3"></script>
-    <script src="js/features/xiangqi.js?v=3"></script>
+    <script src="js/features/xiangqi.js?v=4"></script>
+    <script src="js/features/together.js?v=2"></script>
+    <script src="js/features/space.js?v=3"></script>
 
     <!-- == 合并模块 == -->
     <script src="js/games.js"></script>
@@ -2250,7 +2254,7 @@
     <script src="js/data.js"></script>
     <script src="js/onboarding.js"></script>
     <script src="js/listeners.js"></script>
-    <script src="js/app.js"></script>
+    <script src="js/app.js?v=2"></script>
 
     <!-- iOS Safari 键盘弹起适配：visualViewport 监听，让输入框始终可见 -->
     <script>

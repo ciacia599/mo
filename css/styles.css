@@ -11137,6 +11137,41 @@
         .sri-body    { flex: 1; min-width: 0; }
         .sri-meta    { display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px; }
         .sri-name    { font-size: 12px; font-weight: 600; color: var(--text-primary); }
+
+        /* ============ 后台状态优化：切后台时禁用所有动画/过渡 ============ */
+        body.app-hidden *,
+        body.app-hidden *::before,
+        body.app-hidden *::after {
+            animation-duration: 0.001ms !important;
+            animation-iteration-count: 1 !important;
+            animation-play-state: paused !important;
+            transition-duration: 0.001ms !important;
+            scroll-behavior: auto !important;
+        }
+        body.app-hidden canvas {
+            display: none !important;
+        }
+        body.app-hidden .meteor,
+        body.app-hidden .keepalive-dot,
+        body.app-hidden .keepalive-wave-bar {
+            animation: none !important;
+        }
+
+        /* iOS Safari 特定优化 */
+        @supports (-webkit-touch-callout: none) {
+            body.app-hidden {
+                -webkit-transform: translateZ(0);
+            }
+        }
+
+        /* 减少 GPU 合成层，降低功耗 */
+        body.app-hidden .message-bubble,
+        body.app-hidden .modal-content,
+        body.app-hidden .header,
+        body.app-hidden #chat-container {
+            transform: none !important;
+            will-change: auto !important;
+        }
         .sri-time    { font-size: 11px; color: var(--text-secondary); flex-shrink: 0; margin-left: 8px; }
         .sri-text    { font-size: 12.5px; color: var(--text-secondary); line-height: 1.5; word-break: break-word; }
         .sri-empty   { text-align: center; padding: 28px 0 16px; color: var(--text-secondary); font-size: 13px; }

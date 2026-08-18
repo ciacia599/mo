@@ -59,7 +59,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             safeAwait(initMusicPlayer?.())
         ]);
 
-        setInterval(checkStatusChange, 60000);
+        if (window.__PerfManager) {
+            window.__PerfManager.registerTimer(checkStatusChange, 60000, 'interval');
+        } else {
+            setInterval(checkStatusChange, 60000);
+        }
 
         if (disclaimerModal) {
             const tourSeen = await safeAwait(localforage?.getItem(APP_PREFIX + 'tour_seen'), false);
@@ -82,7 +86,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         setTimeout(hideWelcomeScreen, 3500);
 
         document.addEventListener('visibilitychange', () => {
+            const pm = window.__PerfManager;
             if (document.visibilityState === 'hidden') {
+                try { document.body.classList.add('app-hidden'); } catch(_) {}
                 try {
                     if (typeof saveTimeout !== 'undefined') clearTimeout(saveTimeout);
                 } catch (e) {}
@@ -95,7 +101,17 @@ document.addEventListener('DOMContentLoaded', async () => {
                 } catch (e) {
                     console.error('[visibilitychange] 保存失败:', e);
                 }
+                if (pm) pm.pauseAll();
+                try {
+                    document.querySelectorAll('audio, video').forEach(el => { try { el.pause(); } catch(_) {} });
+                } catch(_) {}
+                try {
+                    const rafId = window.__activeRAF;
+                    if (rafId) { cancelAnimationFrame(rafId); window.__activeRAF = null; }
+                } catch(_) {}
             } else if (document.visibilityState === 'visible') {
+                try { document.body.classList.remove('app-hidden'); } catch(_) {}
+                if (pm) pm.resumeAll();
                 try {
                     const backup = typeof _tryRecoverFromBackup === 'function' ? _tryRecoverFromBackup() : null;
                     if (backup && Array.isArray(backup.messages) && backup.messages.length > 0 && Array.isArray(messages) && backup.messages.length > messages.length) {
@@ -119,17 +135,52 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         });
 
+        // iOS Safari: pagehide 时彻底暂停，防止切后台后仍有资源消耗
         window.addEventListener('pagehide', () => {
+            const pm = window.__PerfManager;
+            if (pm) pm.pauseAll();
+            try { document.body.classList.add('app-hidden'); } catch(_) {}
             try { _backupCriticalData(); } catch (e) {}
+            try {
+                document.querySelectorAll('audio, video').forEach(el => { try { el.pause(); } catch(_) {} });
+            } catch(_) {}
         });
 
         window.addEventListener('beforeunload', () => {
+            const pm = window.__PerfManager;
+            if (pm) pm.pauseAll();
             try { _backupCriticalData(); } catch (e) {}
         });
 
-        setInterval(() => {
+        // iOS Safari: pageshow 时恢复
+        window.addEventListener('pageshow', (e) => {
+            const pm = window.__PerfManager;
+            try { document.body.classList.remove('app-hidden'); } catch(_) {}
+            if (pm) pm.resumeAll();
+            if (e.persisted) {
+                try {
+                    const backup = typeof _tryRecoverFromBackup === 'function' ? _tryRecoverFromBackup() : null;
+                    if (backup && Array.isArray(backup.messages) && backup.messages.length > 0) {
+                        messages = backup.messages.map(m => ({
+                            ...m,
+                            timestamp: new Date(m.timestamp)
+                        }));
+                        if (backup.settings) Object.assign(settings, backup.settings);
+                        if (typeof updateUI === 'function') updateUI();
+                        if (typeof throttledSaveData === 'function') throttledSaveData();
+                    }
+                } catch(_) {}
+            }
+        });
+
+        const autoSaveTick = () => {
             saveData().catch(e => console.warn('[autoBackup] 定时保存失败:', e));
-        }, 3 * 60 * 1000);
+        };
+        if (window.__PerfManager) {
+            window.__PerfManager.registerTimer(autoSaveTick, 3 * 60 * 1000, 'interval');
+        } else {
+            setInterval(autoSaveTick, 3 * 60 * 1000);
+        }
 
         (() => {
             const REMIND_KEY = 'exportReminderLastShown';
