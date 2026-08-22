@@ -46,20 +46,60 @@ let exData = {
     customSounds: [],       // 自定义声音 {id, name, data, time}
 };
 
+/* 把书的 content 分离到独立存储 key，避免整书过大拖垮 extrasData */
+function _bkBookContentKey(bookId) { return getStorageKey('bk_content_' + bookId); }
+function _bkSaveBookContent(bookId, content) {
+    return localforage.setItem(_bkBookContentKey(bookId), content).catch(() => null);
+}
+async function _bkLoadBookContent(bookId) {
+    try { return await localforage.getItem(_bkBookContentKey(bookId)); }
+    catch (e) { return null; }
+}
+async function _bkRemoveBookContent(bookId) {
+    try { await localforage.removeItem(_bkBookContentKey(bookId)); } catch (e) {}
+}
+
 /* 加载数据 */
 async function exLoad() {
+    let saved = null;
     try {
-        const saved = await localforage.getItem(getStorageKey('extrasData'));
-        if (saved) Object.assign(exData, saved);
-    } catch (e) {
+        saved = await localforage.getItem(getStorageKey('extrasData'));
+    } catch (e) {}
+    if (!saved) {
         try {
             const raw = localStorage.getItem('extras_data_fallback');
-            if (raw) Object.assign(exData, JSON.parse(raw));
+            if (raw) saved = JSON.parse(raw);
         } catch (e2) {}
     }
-    // 商城商品初始化（首次或为空时用默认）
+    if (saved) {
+        // 安全合并：嵌套对象保留默认结构并合并
+        Object.keys(saved).forEach(k => {
+            if (k in exData) {
+                if (saved[k] && typeof saved[k] === 'object' && !Array.isArray(saved[k])
+                    && exData[k] && typeof exData[k] === 'object' && !Array.isArray(exData[k])) {
+                    Object.assign(exData[k], saved[k]);
+                } else {
+                    exData[k] = saved[k];
+                }
+            }
+        });
+    }
+    // 结构兜底（升级兼容）
+    if (!exData.reading) exData.reading = { books: [], currentId: null, partnerProgress: 0 };
+    if (!Array.isArray(exData.reading.books)) exData.reading.books = [];
     if (!exData.shopItems || !exData.shopItems.length) {
         exData.shopItems = SHOP_ITEMS.map(x => ({ ...x, custom:false }));
+    }
+    // ==== 修复：重新加载导入书籍正文（从独立存储 key） ====
+    // 对于每本书：如果正文不在 books[i].content 但有存储，就加载回来
+    for (const b of exData.reading.books) {
+        if (!b.content && b.id) {
+            // 如果有 localStorage fallback 备份（只存了 metadata），尝试从独立 key 取正文
+            const content = await _bkLoadBookContent(b.id);
+            if (content && typeof content === 'string' && content.length) {
+                b.content = content;
+            }
+        }
     }
     // 检查红包过期退回（24h 未领取 → 自动退给发送者）
     exCheckRedpacketExpiry();
@@ -89,11 +129,29 @@ function exCheckRedpacketExpiry() {
 
 /* 保存数据 */
 function exSave() {
+    // 构建一个不含大 content 的轻量版用于 localStorage fallback
+    const lite = Object.assign({}, exData, {
+        reading: exData.reading ? {
+            ...exData.reading,
+            books: exData.reading.books.map(b => {
+                const book = { ...b };
+                if (book.content) {
+                    // 写入独立存储
+                    _bkSaveBookContent(b.id, book.content);
+                    delete book.content; // 轻量版不包含正文
+                }
+                return book;
+            })
+        } : exData.reading
+    });
     try {
+        // 主存储：用完整版（含 content）
         localforage.setItem(getStorageKey('extrasData'), exData).catch(() => {});
-    } catch (e) {
-        try { localStorage.setItem('extras_data_fallback', JSON.stringify(exData)); } catch (e2) {}
-    }
+    } catch (e) {}
+    try {
+        // fallback 仅存轻量版
+        localStorage.setItem('extras_data_fallback', JSON.stringify(lite));
+    } catch (e2) {}
 }
 
 /* ============ 通用工具 ============ */
@@ -194,10 +252,7 @@ function exRenderHub() {
         { key:'link', icon:'fa-wifi', name:'链接监测', desc:'在线/距离/心跳', color:'#00B894' },
         { key:'checkin', icon:'fa-bell', name:'查岗', desc:'定时监测对方', color:'#E17055' },
         { key:'fav', icon:'fa-star', name:'对方收藏', desc:'Ta 的珍藏对话', color:'#FDCB6E' },
-        { key:'push', icon:'fa-broadcast-tower', name:'后台推送', desc:'消息实时提醒', color:'#0984E3' },
         { key:'journal', icon:'fa-feather', name:'觉察日志', desc:'反思与成长', color:'#00CEC9' },
-        { key:'ai', icon:'fa-wand-magic-sparkles', name:'AI 解牌', desc:'塔罗+AI分析', color:'#A29BFE' },
-        { key:'sound', icon:'fa-volume-up', name:'自定义声音', desc:'录制/上传音效', color:'#FD79A8' },
     ];
     grid.innerHTML = items.map(it => `
         <div class="ex-hub-card" onclick="exOpen('${it.key}')" style="--card-color:${it.color};">
@@ -247,10 +302,7 @@ window.exOpen = function(key) {
         link: exViewLinkStatus,
         checkin: exViewCheckin,
         fav: exViewPartnerFavs,
-        push: exViewBgPush,
         journal: exViewJournal,
-        ai: exViewAI,
-        sound: exViewSound,
     };
     if (map[key]) map[key]();
 };
@@ -1368,6 +1420,7 @@ window.exBookPage = function(id, delta) {
 
 window.exDelBook = function(id) {
     if (!confirm('从书单移除？')) return;
+    _bkRemoveBookContent(id);
     exData.reading.books = exData.reading.books.filter(b => b.id !== id);
     if (exData.reading.currentId === id) exData.reading.currentId = exData.reading.books[0]?.id || null;
     exSave();
@@ -2185,44 +2238,247 @@ function exRenderPartnerCheckins() {
     `).join('');
 }
 
-/* ============ 13. 对方收藏的对话 ============ */
-function exViewPartnerFavs() {
-    // 从消息里找对方收藏的（用 favorited 字段，模拟对方视角）
-    let favMsgs = [];
-    try {
-        if (typeof messages !== 'undefined' && messages.length) {
-            favMsgs = messages.filter(m => m.favorited && m.sender === 'partner');
-        }
-    } catch(e) {}
-    // 如果没有对方收藏的，模拟一些
-    if (!favMsgs.length) {
-        favMsgs = [
-            { id:'pf_1', text:'今天真的好想你…', time: new Date(Date.now()-3600000).toISOString() },
-            { id:'pf_2', text:'你说过的话我都记得哦', time: new Date(Date.now()-7200000).toISOString() },
-            { id:'pf_3', text:'「在一起的每一秒都想定格」', time: new Date(Date.now()-86400000).toISOString() },
-        ];
-    }
-    exData.partnerFavs = favMsgs;
+/* ============ 13. 对方收藏的对话（改造：支持文字/图片/表情，时间数量可调，随机收藏我发的消息） ============ */
+window.exSavePartnerFavCfg = function() {
+    const en = document.getElementById('pf-enabled');
+    const cnt = document.getElementById('pf-cnt');
+    const mn = document.getElementById('pf-min');
+    const mx = document.getElementById('pf-max');
+    const tText = document.getElementById('pf-t-text');
+    const tImg  = document.getElementById('pf-t-image');
+    const tEmo  = document.getElementById('pf-t-emoji');
+    if (en)  exData.partnerFav.enabled = en.checked;
+    if (cnt) exData.partnerFav.timesPerDay = Math.max(1, Math.min(20, parseInt(cnt.value,10)||5));
+    const m = parseInt(mn && mn.value, 10);
+    const x = parseInt(mx && mx.value, 10);
+    exData.partnerFav.minIntervalMin = Math.max(1, Math.min(1440, Math.min(m||10, x||360)));
+    exData.partnerFav.maxIntervalMin = Math.max(1, Math.min(1440, Math.max(m||10, x||360)));
+    exData.partnerFav.types = [];
+    if (tText && tText.checked) exData.partnerFav.types.push('text');
+    if (tImg  && tImg.checked)  exData.partnerFav.types.push('image');
+    if (tEmo  && tEmo.checked)  exData.partnerFav.types.push('emoji');
+    if (!exData.partnerFav.types.length) exData.partnerFav.types = ['text','image','emoji'];
     exSave();
-    exSetBody(exHeader('⭐ ' + exEscape(exPartnerName()) + ' 的珍藏', 'Ta 收藏的每一句话都是心跳') + `
+    // 重启一下定时器
+    exPartnerStartFavLoop();
+    showNotification('收藏偏好已保存 ✓', 'success');
+    // 刷新当前视图
+    exViewPartnerFavs();
+};
+
+/* 从 messages 中挑一条最近 24 小时、我发的、符合类型约束的消息用于收藏（无则返回 null） */
+function exPickOneMsgForPartnerFav() {
+    try {
+        if (typeof messages === 'undefined' || !messages || !messages.length) return null;
+        const cfg = exData.partnerFav;
+        const types = cfg.types && cfg.types.length ? cfg.types : ['text','image','emoji'];
+        const cutoff = Date.now() - 24 * 3600 * 1000;
+        const pool = messages.filter(m => {
+            if (m.sender !== 'user') return false; // 只收藏"我发的"
+            const t = new Date(m.timestamp || m.time).getTime();
+            if (t < cutoff) return false;
+            // 判定类型
+            if (m.image && types.includes('image')) return true;
+            if (m.emoji && types.includes('emoji')) return true;
+            if (types.includes('text') && !m.image && !(m.emoji)) {
+                // 纯文字：不能是空的
+                return !!(m.text && m.text.trim().length);
+            }
+            // 文字里包含 emoji Unicode 字符，也算表情
+            if (types.includes('emoji') && /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{1200}-\u{137F}]/u.test(m.text||'')) return true;
+            return false;
+        });
+        if (!pool.length) return null;
+        return pool[Math.floor(Math.random() * pool.length)];
+    } catch(e) {
+        return null;
+    }
+}
+
+/* 让对方收藏一条消息（类型、内容随机），并写入 partnerFavs */
+window.exPartnerFavNow = function(manual) {
+    const cfg = exData.partnerFav;
+    if (!cfg.enabled && !manual) return false;
+    const dayKey = new Date().toDateString();
+    if (cfg.dayKey !== dayKey) { cfg.dayKey = dayKey; cfg.countToday = 0; }
+    if (!manual && cfg.countToday >= cfg.timesPerDay) return false;
+
+    let msg = exPickOneMsgForPartnerFav();
+    let fav = null;
+    if (msg) {
+        let type = 'text';
+        if (msg.image) type = 'image';
+        else if (msg.emoji) type = 'emoji';
+        else if (/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(msg.text||'')) type = 'emoji';
+        fav = {
+            id: 'pf_' + Date.now() + '_' + Math.floor(Math.random()*10000),
+            type,
+            text: type==='image' ? null : (msg.emoji || msg.text || ''),
+            image: msg.image || null,
+            time: new Date().toISOString(),
+            sourceMsgId: msg.id || null,
+            count: 1,
+        };
+    } else {
+        // 聊天记录里没合适的 → 自己模拟一条"对方收藏的我发的内容"
+        const types = cfg.types && cfg.types.length ? cfg.types : ['text','image','emoji'];
+        const type = types[Math.floor(Math.random()*types.length)];
+        const textSamples = [
+            '一起加油鸭！', '今天真的好开心~', '谢谢你陪我 ☀️',
+            '好想你 什么时候见面', '晚安 🌙 做个好梦', '这句话我收藏啦 💗',
+            '今天也是爱你的一天', '你怎么这么可爱！'
+        ];
+        if (type === 'text') {
+            fav = { id:'pf_'+Date.now(), type:'text', text: textSamples[Math.floor(Math.random()*textSamples.length)], time: new Date().toISOString(), count: 1 };
+        } else if (type === 'emoji') {
+            const emojis = ['🥰💖','🌸✨','🌷🌼','🍓🧁','☕🍰','🐱💭','🌙⭐','🫶💌'];
+            fav = { id:'pf_'+Date.now(), type:'emoji', text: emojis[Math.floor(Math.random()*emojis.length)], time: new Date().toISOString(), count: 1 };
+        } else {
+            // image：存一个缩略图链接（用涂鸦画板示例图，避免空图）
+            fav = { id:'pf_'+Date.now(), type:'image', image: null, text:'[Ta珍藏了一张我发的图片]', time: new Date().toISOString(), count: 1 };
+        }
+    }
+    if (!fav) return false;
+    if (!Array.isArray(exData.partnerFavs)) exData.partnerFavs = [];
+    exData.partnerFavs.unshift(fav);
+    if (exData.partnerFavs.length > 500) exData.partnerFavs.length = 500;
+    cfg.lastFavAt = fav.time;
+    cfg.countToday = (cfg.countToday || 0) + 1;
+    exSave();
+    // 系统通知
+    if (typeof showNotification === 'function') {
+        showNotification(`${exPartnerName()} 收藏了你的一条内容 ⭐`, 'info', 3500);
+    }
+    return true;
+};
+
+/* 对方收藏定时循环：下一次时间随机 minInterval~maxInterval 分钟 */
+let _exPartnerFavTimer = null;
+window.exPartnerStartFavLoop = function() {
+    if (_exPartnerFavTimer) { try { clearTimeout(_exPartnerFavTimer); } catch(_){} _exPartnerFavTimer = null; }
+    const cfg = exData.partnerFav;
+    if (!cfg.enabled) return;
+    const minMin = Math.max(1, cfg.minIntervalMin || 10);
+    const maxMin = Math.max(minMin, cfg.maxIntervalMin || 360);
+    const nextMin = minMin + Math.random() * (maxMin - minMin);
+    const nextMs = Math.round(nextMin * 60 * 1000);
+    const cb = () => {
+        // 日期重置
+        const dayKey = new Date().toDateString();
+        if (cfg.dayKey !== dayKey) { cfg.dayKey = dayKey; cfg.countToday = 0; }
+        if (cfg.countToday < cfg.timesPerDay) {
+            try { exPartnerFavNow(false); } catch(e) { console.warn('[fav]', e); }
+        }
+        // 安排下一轮
+        _exPartnerFavTimer = null;
+        exPartnerStartFavLoop();
+    };
+    if (typeof window.__PerfManager === 'function' || (window.__PerfManager && typeof window.__PerfManager.registerTimer === 'function')) {
+        _exPartnerFavTimer = window.__PerfManager.registerTimer(cb, nextMs, 'timeout');
+    } else {
+        _exPartnerFavTimer = setTimeout(cb, nextMs);
+    }
+};
+
+function exViewPartnerFavs() {
+    const cfg = exData.partnerFav;
+    if (!Array.isArray(exData.partnerFavs)) exData.partnerFavs = [];
+    // 兼容老数据：补齐 type 字段
+    exData.partnerFavs.forEach(f => {
+        if (!f.type) f.type = 'text';
+        if (!f.count) f.count = 1;
+    });
+    const favMsgs = exData.partnerFavs.slice();
+    exSave();
+    const types = cfg.types || ['text','image','emoji'];
+    exSetBody(exHeader('⭐ ' + exEscape(exPartnerName()) + ' 的珍藏', 'Ta 收藏的每一句话、每一张图都是心跳') + `
         <div style="background:var(--message-received-bg); border-radius:14px; padding:16px; margin-bottom:14px; text-align:center;">
             <div style="font-size:36px;">💝</div>
-            <div style="font-size:13px; color:var(--text-primary); margin-top:4px;">${exEscape(exPartnerName())} 收藏了 <b>${favMsgs.length}</b> 条对话</div>
+            <div style="font-size:13px; color:var(--text-primary); margin-top:4px;">${exEscape(exPartnerName())} 收藏了 <b>${favMsgs.length}</b> 条内容 · 今日已收藏 <b>${cfg.countToday||0}/${cfg.timesPerDay}</b></div>
         </div>
+
+        <div style="background:var(--primary-bg);border:1px solid var(--border-color);border-radius:12px;padding:12px;margin-bottom:14px;">
+            <div style="font-size:13px;font-weight:700;color:var(--text-primary);margin-bottom:8px;">⚙️ 对方收藏偏好（时间/数量/类型随意调）</div>
+
+            <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-primary);margin-bottom:10px;">
+                <input id="pf-enabled" type="checkbox" ${cfg.enabled ? 'checked' : ''}>
+                允许对方主动收藏我的消息
+            </label>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+                <div>
+                    <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px;">每天最多收藏几次（1-20）</div>
+                    <input id="pf-cnt" type="number" min="1" max="20" value="${cfg.timesPerDay}" style="width:100%;padding:7px;border:1px solid var(--border-color);border-radius:8px;background:var(--secondary-bg);color:var(--text-primary);box-sizing:border-box;">
+                </div>
+                <div>
+                    <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px;">允许收藏的类型</div>
+                    <div style="display:flex;gap:8px;align-items:center;padding:6px 0;">
+                        <label style="display:flex;align-items:center;gap:4px;font-size:11px;"><input id="pf-t-text"  type="checkbox" ${types.includes('text')?'checked':''}> 文字</label>
+                        <label style="display:flex;align-items:center;gap:4px;font-size:11px;"><input id="pf-t-image" type="checkbox" ${types.includes('image')?'checked':''}> 图片</label>
+                        <label style="display:flex;align-items:center;gap:4px;font-size:11px;"><input id="pf-t-emoji" type="checkbox" ${types.includes('emoji')?'checked':''}> 表情包</label>
+                    </div>
+                </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+                <div>
+                    <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px;">最短间隔（分钟）</div>
+                    <input id="pf-min" type="number" min="1" max="1440" value="${cfg.minIntervalMin}" style="width:100%;padding:7px;border:1px solid var(--border-color);border-radius:8px;background:var(--secondary-bg);color:var(--text-primary);box-sizing:border-box;">
+                </div>
+                <div>
+                    <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px;">最长间隔（分钟）</div>
+                    <input id="pf-max" type="number" min="1" max="1440" value="${cfg.maxIntervalMin}" style="width:100%;padding:7px;border:1px solid var(--border-color);border-radius:8px;background:var(--secondary-bg);color:var(--text-primary);box-sizing:border-box;">
+                </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                <button class="ex-primary-btn" style="padding:9px;font-size:12px;border-radius:10px;" onclick="window.exSavePartnerFavCfg()">💾 保存设置</button>
+                <button class="ex-quick-btn" style="padding:9px;font-size:12px;border-radius:10px;" onclick="if(confirm('让 ${exEscapeJS(exPartnerName())} 现在立刻收藏一条吗？')){ window.exPartnerFavNow(true); setTimeout(()=>{ window.exViewPartnerFavs && window.exViewPartnerFavs(); }, 600); }">⭐ 立即模拟收藏一条</button>
+            </div>
+        </div>
+
         <div id="ex-fav-list"></div>
     `);
     const list = document.getElementById('ex-fav-list');
     if (!list) return;
-    list.innerHTML = favMsgs.map(m => `
-        <div style="background:var(--primary-bg); border:1px solid var(--border-color); border-radius:12px; padding:12px 14px; margin-bottom:10px;">
-            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
-                <div style="flex:1; font-size:14px; color:var(--text-primary); line-height:1.5;">${exEscape(m.text)}</div>
-                <span style="color:#FDCB6E; font-size:16px;">⭐</span>
+    if (!favMsgs.length) {
+        list.innerHTML = `<div style="text-align:center;padding:30px 12px;color:var(--text-secondary);font-size:12px;">还没有任何收藏，点上面「⭐ 立即模拟收藏一条」试试吧～</div>`;
+        return;
+    }
+    list.innerHTML = favMsgs.map(m => {
+        const icon = m.type==='image' ? '🖼️' : (m.type==='emoji' ? '😆' : '📝');
+        const contentHtml = (m.type === 'image' && m.image)
+            ? `<img src="${m.image}" style="max-width:100%;max-height:160px;border-radius:10px;object-fit:cover;">`
+            : (m.type === 'emoji'
+                ? `<div style="font-size:24px;">${exEscape(m.text||'😉')}</div>`
+                : `<div style="font-size:14px; color:var(--text-primary); line-height:1.5;">${exEscape(m.text||'')}</div>`);
+        return `
+            <div style="background:var(--primary-bg); border:1px solid var(--border-color); border-radius:12px; padding:12px 14px; margin-bottom:10px;">
+                <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
+                    <div style="display:flex; align-items:center; gap:8px; font-size:11px; color:var(--text-secondary);">
+                        <span style="font-size:14px;">${icon}</span>
+                        <span>${m.type==='image' ? '图片' : m.type==='emoji' ? '表情' : '文字'}</span>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:6px;">
+                        <span style="color:#FDCB6E; font-size:14px;">⭐</span>
+                        <button onclick="window.exDelPartnerFav('${m.id}')" style="font-size:10px;color:var(--text-secondary);background:none;border:none;cursor:pointer;">🗑</button>
+                    </div>
+                </div>
+                <div style="margin-top:8px;">${contentHtml}</div>
+                <div style="font-size:10px; color:var(--text-secondary); margin-top:6px;">${exFmtDate(m.time).slice(5)}</div>
             </div>
-            <div style="font-size:10px; color:var(--text-secondary); margin-top:6px;">${exFmtDate(m.time).slice(5)}</div>
-        </div>
-    `).join('');
+        `;
+    }).join('');
 }
+
+window.exDelPartnerFav = function(id) {
+    if (!confirm('删除这条收藏？')) return;
+    exData.partnerFavs = (exData.partnerFavs||[]).filter(f => f.id !== id);
+    exSave();
+    exViewPartnerFavs();
+};
+
+window.exEscapeJS = function(s){ return String(s==null?'':s).replace(/'/g, "\\'").replace(/\n/g,'\\n'); };
 
 /* ============ 14. 后台消息推送 ============ */
 let exPushTimer = null;
@@ -2784,22 +3040,1020 @@ window.exSoundPlay = function(id) {
 };
 
 window.exSoundDel = function(id) {
-    if (!confirm('删除这个声音？')) return;
     exData.customSounds = exData.customSounds.filter(s => s.id !== id);
     exSave();
     exSoundRender();
 };
 
+/* ============================================================
+ * 新增：①聊天节奏自定义(我/对方独立)
+ *       ②红包双向发送
+ *       ③对方查岗可配置
+ *       ④主动写信/主动提问
+ *       ⑤邀请陪伴(工作/学习/运动/睡觉)
+ *       ⑥通话记录
+ *       ⑦各板块一键导出
+ *       ⑧私聊独立会话+头像名字
+ *       ⑨朋友圈  (见 features/moments.js)
+ * ============================================================ */
+
+/* ---- 数据结构扩展 ---- */
+(function extendExData(){
+    const defaults = {
+        // ①节奏：我的节奏 / 对方节奏独立配置
+        myRhythm: { mode: 'preset', preset: 'normal', customMin: 3000, customMax: 7000, msgCount: 1 },
+        partnerRhythm: { mode: 'preset', preset: 'normal', customMin: 3000, customMax: 7000, msgCount: 1,
+            autoReplyChance: 0.9 },
+        // 红包双向：默认开启"对方也可以发红包"模拟
+        rpBothSide: true,
+        rpPartnerSendTimer: null,
+        // 查岗：对方查岗可调时间/次数
+        partnerCheckin: {
+            enabled: true,
+            timesPerDay: 3,        // 每天查几次（1-20）
+            minIntervalMin: 60,    // 最短间隔（分钟）
+            maxIntervalMin: 300,   // 最长间隔
+            lastSent: null,
+            countToday: 0,
+            dayKey: null
+        },
+        // 邀请陪伴
+        invitations: [],         // {id, type:'work'|'study'|'sleep'|'exercise', durationMin, status:'pending'|'accepted'|'rejected', from:'partner'|'me', time, replyAt}
+        // 通话记录（与 call.js 联动）
+        callRecords: [],         // {id, type:'voice'|'video', durationSec, startedAt, endedAt, result:'connected'|'missed'|'ended', from:'partner'|'me'}
+        // 主动写信/提问
+        mailbox: [],             // {id, kind:'letter'|'question', from:'me'|'partner', title, content, answer, time, answeredAt}
+        // 独立会话
+        pms: [],                 // {id, name, avatar, desc, createdAt, messages:[{id, sender, text, time}]}
+        currentPmId: null,
+        // 对方收藏：可调时间/次数，支持文字/图片/表情随机收藏
+        partnerFav: {
+            enabled: true,
+            timesPerDay: 5,         // 每天对方主动收藏几次（1-20）
+            minIntervalMin: 10,     // 最短间隔（分钟）
+            maxIntervalMin: 360,    // 最长间隔
+            types: ['text','image','emoji'],  // 允许收藏的类型
+            lastFavAt: null,
+            countToday: 0,
+            dayKey: null,
+        },
+    };
+    Object.keys(defaults).forEach(k => {
+        if (exData[k] === undefined) exData[k] = defaults[k];
+    });
+    // 日期重置查岗计数
+    const todayKey = new Date().toDateString();
+    if (exData.partnerCheckin.dayKey !== todayKey) {
+        exData.partnerCheckin.dayKey = todayKey;
+        exData.partnerCheckin.countToday = 0;
+    }
+    // 日期重置对方收藏计数
+    if (exData.partnerFav.dayKey !== todayKey) {
+        exData.partnerFav.dayKey = todayKey;
+        exData.partnerFav.countToday = 0;
+    }
+})();
+
+/* ============ ① 节奏：自定义(独立) ============ */
+window.exSetMyRhythmPreset = function(k) {
+    if (!EX_REPLY_SPEEDS[k]) return;
+    exData.myRhythm.mode = 'preset'; exData.myRhythm.preset = k;
+    const c = EX_REPLY_SPEEDS[k];
+    exData.myRhythm.customMin = c.min; exData.myRhythm.customMax = c.max;
+    exSave();
+    // 应用到全局 settings 的「我发节奏」- 供 UI 参考
+    if (typeof settings !== 'undefined') {
+        settings.myReplyDelayMin = c.min; settings.myReplyDelayMax = c.max;
+        if (typeof throttledSaveData === 'function') throttledSaveData();
+    }
+    showNotification('「我的节奏」已更新为 ' + c.label, 'success');
+    exViewStatus();
+};
+window.exSetPartnerRhythmPreset = function(k) {
+    if (!EX_REPLY_SPEEDS[k]) return;
+    exData.partnerRhythm.mode = 'preset'; exData.partnerRhythm.preset = k;
+    const c = EX_REPLY_SPEEDS[k];
+    exData.partnerRhythm.customMin = c.min; exData.partnerRhythm.customMax = c.max;
+    // 同步到全局 settings（对方回复延迟）
+    if (typeof settings !== 'undefined') {
+        settings.replyDelayMin = c.min; settings.replyDelayMax = c.max;
+        if (typeof throttledSaveData === 'function') throttledSaveData();
+    }
+    exSave();
+    showNotification('「对方节奏」已更新为 ' + c.label, 'success');
+    exViewStatus();
+};
+window.exSaveCustomRhythm = function(who) {
+    const minSec = parseFloat(document.getElementById('ex-rh-min-' + who).value);
+    const maxSec = parseFloat(document.getElementById('ex-rh-max-' + who).value);
+    const cnt = parseInt(document.getElementById('ex-rh-cnt-' + who).value, 10) || 1;
+    const chance = parseFloat(document.getElementById('ex-rh-chance-' + who)?.value);
+    if (isNaN(minSec) || isNaN(maxSec) || minSec <= 0 || maxSec < minSec) {
+        showNotification('请填有效的秒数范围', 'warning'); return;
+    }
+    const r = who === 'me' ? exData.myRhythm : exData.partnerRhythm;
+    r.mode = 'custom';
+    r.customMin = Math.round(minSec * 1000);
+    r.customMax = Math.round(maxSec * 1000);
+    r.msgCount = Math.max(1, Math.min(10, cnt));
+    if (!isNaN(chance)) r.autoReplyChance = Math.max(0, Math.min(1, chance));
+    // 应用到全局 settings（对方）
+    if (typeof settings !== 'undefined' && who === 'partner') {
+        settings.replyDelayMin = r.customMin; settings.replyDelayMax = r.customMax;
+        if (typeof throttledSaveData === 'function') throttledSaveData();
+    }
+    exSave();
+    showNotification((who === 'me' ? '我的节奏' : '对方节奏') + ' 自定义已保存', 'success');
+    exViewStatus();
+};
+/* 在状态页中插入节奏设置区块 HTML */
+function exHtmlRhythmPanel() {
+    const whoBlocks = [
+        { who:'me', title:'🕐 我的回复节奏（我发消息给对方的节奏）' },
+        { who:'partner', title:'⚡ 对方回复节奏（对方回复我的节奏，可调 min/max 与条数）' }
+    ];
+    return whoBlocks.map(wb => {
+        const r = wb.who === 'me' ? exData.myRhythm : exData.partnerRhythm;
+        const presetBtns = Object.entries(EX_REPLY_SPEEDS).map(([k,v]) =>
+            `<button class="ex-quick-btn" onclick="exSet${wb.who==='me'?'My':'Partner'}RhythmPreset('${k}')"
+                style="flex:1;min-width:60px;${r.mode==='preset' && r.preset===k?'background:var(--accent-color);color:#fff;border-color:var(--accent-color);':''}">${v.label}</button>`
+        ).join('');
+        const cur = r.mode === 'custom'
+            ? `${(r.customMin/1000).toFixed(1)}s ~ ${(r.customMax/1000).toFixed(1)}s × ${r.msgCount} 条`
+            : (EX_REPLY_SPEEDS[r.preset]?.label || '正常') + ` (${r.customMin/1000}-${r.customMax/1000}s)`;
+        return `
+        <div style="background:var(--primary-bg); border:1px solid var(--border-color); border-radius:12px; padding:12px; margin-bottom:14px;">
+            <div style="font-size:12px; color:var(--text-secondary); margin-bottom:8px;">${wb.title}</div>
+            <div style="display:flex; gap:4px; flex-wrap:wrap; margin-bottom:10px;">${presetBtns}</div>
+            <div style="font-size:11px; color:var(--accent-color); margin-bottom:6px;">当前：${cur}</div>
+            <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; margin-bottom:6px;">
+                <div>
+                    <div style="font-size:10px;color:var(--text-secondary);">最小秒</div>
+                    <input id="ex-rh-min-${wb.who}" type="number" step="0.1" min="0.1" value="${(r.customMin/1000).toFixed(1)}"
+                        style="width:100%;padding:6px;border:1px solid var(--border-color);border-radius:8px;background:var(--secondary-bg);color:var(--text-primary);font-size:12px;">
+                </div>
+                <div>
+                    <div style="font-size:10px;color:var(--text-secondary);">最大秒</div>
+                    <input id="ex-rh-max-${wb.who}" type="number" step="0.1" min="0.1" value="${(r.customMax/1000).toFixed(1)}"
+                        style="width:100%;padding:6px;border:1px solid var(--border-color);border-radius:8px;background:var(--secondary-bg);color:var(--text-primary);font-size:12px;">
+                </div>
+                <div>
+                    <div style="font-size:10px;color:var(--text-secondary);">每次条数</div>
+                    <input id="ex-rh-cnt-${wb.who}" type="number" step="1" min="1" max="10" value="${r.msgCount}"
+                        style="width:100%;padding:6px;border:1px solid var(--border-color);border-radius:8px;background:var(--secondary-bg);color:var(--text-primary);font-size:12px;">
+                </div>
+            </div>
+            ${wb.who === 'partner' ? `
+            <div style="margin-bottom:6px;">
+                <div style="font-size:10px;color:var(--text-secondary);">回复概率 (0-1)：${(r.autoReplyChance ?? 0.9).toFixed(2)}</div>
+                <input id="ex-rh-chance-partner" type="number" step="0.05" min="0" max="1" value="${(r.autoReplyChance ?? 0.9).toFixed(2)}"
+                    style="width:100%;padding:6px;border:1px solid var(--border-color);border-radius:8px;background:var(--secondary-bg);color:var(--text-primary);font-size:12px;">
+            </div>` : ''}
+            <button class="ex-primary-btn" style="width:100%; padding:8px; font-size:12px;" onclick="exSaveCustomRhythm('${wb.who}')">💾 保存自定义${wb.who === 'me' ? '我方' : '对方'}节奏</button>
+        </div>`;
+    }).join('');
+}
+
+/* ============ 红包双向发送：模拟对方主动发红包 ============ */
+let exRpPartnerTimer = null;
+function exPartnerStartSendingRp() {
+    if (!exData.rpBothSide) return;
+    if (exRpPartnerTimer) return;
+    const schedule = () => {
+        const next = (6 * 60 * 60 * 1000) + Math.random() * (6 * 60 * 60 * 1000); // 6~12h 一个
+        if (window.__PerfManager) {
+            exRpPartnerTimer = window.__PerfManager.registerTimer(() => {
+                if (window.__PerfManager.isPaused) return;
+                exPartnerSendRp();
+                if (window.__PerfManager && exRpPartnerTimer) window.__PerfManager.unregisterTimer(exRpPartnerTimer);
+                exRpPartnerTimer = null;
+                schedule();
+            }, next, 'timeout');
+        } else {
+            exRpPartnerTimer = setTimeout(() => { exPartnerSendRp(); exRpPartnerTimer = null; schedule(); }, next);
+        }
+    };
+    setTimeout(schedule, 2 * 60 * 60 * 1000); // 启动后 2h 第一个
+}
+window.exPartnerSendRp = function(debug) {
+    const amount = debug ? (debug.amount || 52) : (20 + Math.floor(Math.random() * 200));
+    if (exData.partnerCoins < amount) return;
+    const words = ['小小意思~', '给你买奶茶 🧋', '爱你么么哒 💋', '奖励一下 🎁', '今天也要加油呀 🌟', '零花钱 💰', '小小心意'];
+    const msg = words[Math.floor(Math.random() * words.length)];
+    const rp = {
+        id: 'rp_' + Date.now(),
+        from: 'partner',
+        amount,
+        message: msg,
+        time: new Date().toISOString(),
+        opened: false, openedBy: null, openedAt: null,
+        expired: false, expiredAt: null
+    };
+    exData.partnerCoins -= amount;
+    exData.redpackets.push(rp);
+    exSave();
+    // 发到聊天卡片
+    if (typeof addMessage === 'function') {
+        addMessage({
+            id: Date.now(), sender:'partner',
+            text:`🧧 红包 ${amount} 金币\n「${msg}」\n(点击领取)`,
+            timestamp: new Date(), status:'received', type:'redpacket', redpacketId: rp.id
+        });
+    }
+    showNotification(`${exPartnerName()} 给你发了一个红包 🧧`, 'success', 3500);
+    if (typeof playSound === 'function') playSound('partner_message');
+};
+
+/* ============ 对方查岗可配置 + 模拟对方查岗 ============ */
+function exHtmlPartnerCheckinPanel() {
+    const p = exData.partnerCheckin;
+    return `
+    <div style="background:var(--primary-bg); border:1px solid var(--border-color); border-radius:12px; padding:12px; margin-bottom:14px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <div style="font-size:12px; color:var(--text-secondary);">🔍 对方查岗（可配置时间/次数）</div>
+            <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:11px;">
+                <input type="checkbox" id="ex-pchk-enabled" ${p.enabled?'checked':''} onchange="exPchkToggle(this)"> 开启
+            </label>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:6px;">
+            <div>
+                <div style="font-size:10px;color:var(--text-secondary);">每日次数</div>
+                <input id="ex-pchk-count" type="number" min="1" max="20" value="${p.timesPerDay}"
+                    style="width:100%;padding:6px;border:1px solid var(--border-color);border-radius:8px;background:var(--secondary-bg);color:var(--text-primary);font-size:12px;">
+            </div>
+            <div>
+                <div style="font-size:10px;color:var(--text-secondary);">最短间隔分</div>
+                <input id="ex-pchk-min" type="number" min="15" max="1440" value="${p.minIntervalMin}"
+                    style="width:100%;padding:6px;border:1px solid var(--border-color);border-radius:8px;background:var(--secondary-bg);color:var(--text-primary);font-size:12px;">
+            </div>
+            <div>
+                <div style="font-size:10px;color:var(--text-secondary);">最长间隔分</div>
+                <input id="ex-pchk-max" type="number" min="30" max="1440" value="${p.maxIntervalMin}"
+                    style="width:100%;padding:6px;border:1px solid var(--border-color);border-radius:8px;background:var(--secondary-bg);color:var(--text-primary);font-size:12px;">
+            </div>
+        </div>
+        <div style="font-size:10px;color:var(--text-secondary);margin-bottom:8px;">
+            今日已查 ${p.countToday}/${p.timesPerDay} 次
+            ${p.lastSent ? `· 上次：${exFmtDate(p.lastSent)}` : ''}
+        </div>
+        <div style="display:flex;gap:6px;">
+            <button class="ex-primary-btn" style="flex:1;padding:8px;font-size:12px;" onclick="exPchkSave()">💾 保存配置</button>
+            <button class="ex-quick-btn" style="padding:8px 14px;font-size:12px;" onclick="exPartnerNowCheckin()">🎯 模拟立即查岗</button>
+        </div>
+    </div>`;
+}
+window.exPchkToggle = function(cb) {
+    exData.partnerCheckin.enabled = !!cb.checked; exSave();
+};
+window.exPchkSave = function() {
+    const cnt = parseInt(document.getElementById('ex-pchk-count').value,10)||3;
+    const mn = parseInt(document.getElementById('ex-pchk-min').value,10)||60;
+    const mx = parseInt(document.getElementById('ex-pchk-max').value,10)||300;
+    exData.partnerCheckin.timesPerDay = Math.max(1, Math.min(20, cnt));
+    exData.partnerCheckin.minIntervalMin = Math.max(5, Math.min(1440, Math.min(mn, mx)));
+    exData.partnerCheckin.maxIntervalMin = Math.max(30, Math.max(mn, mx));
+    exSave();
+    showNotification('对方查岗配置已保存', 'success');
+};
+window.exPartnerNowCheckin = function() {
+    const activities = [
+        { doing:'刚刚刷到一个很可爱的视频，你在干嘛？', result:'忙，但有想你' },
+        { doing:'喝水时突然想看看你～告诉我你现在在做啥？', result:'在工作/学习' },
+        { doing:'突然想你了 💕 拍一下你正在做的事情可以吗？', result:'认真中' },
+        { doing:'晚饭吃啥了？是不是又偷懒不吃！', result:'有好好吃饭' },
+        { doing:'今天有没有想我呀？嘻嘻 👉👈', result:'想你了' }
+    ];
+    const pick = activities[Math.floor(Math.random() * activities.length)];
+    const rec = {
+        id: 'pck_' + Date.now(),
+        time: new Date().toISOString(),
+        whatDoing: pick.doing,
+        result: pick.result
+    };
+    exData.partnerCheckins.unshift(rec);
+    if (exData.partnerCheckins.length > 30) exData.partnerCheckins.length = 30;
+    exData.partnerCheckin.lastSent = rec.time;
+    exData.partnerCheckin.countToday = (exData.partnerCheckin.countToday || 0) + 1;
+    exSave();
+    if (typeof addMessage === 'function') {
+        addMessage({
+            id: Date.now(), sender:'partner',
+            text:`🔍 查岗\n${pick.doing}`,
+            timestamp: new Date(), status:'received', type:'checkin'
+        });
+    }
+    showNotification(`${exPartnerName()} 来查岗啦 🔍`, 'warning', 4000);
+    if (typeof playSound === 'function') playSound('partner_message');
+    if (typeof exRenderPartnerCheckins === 'function') exRenderPartnerCheckins();
+};
+let exPchkTimer = null;
+function exPartnerStartCheckin() {
+    if (exPchkTimer) return;
+    if (window.__PerfManager) {
+        exPchkTimer = window.__PerfManager.registerTimer(() => {
+            if (window.__PerfManager.isPaused) return;
+            const todayKey = new Date().toDateString();
+            if (exData.partnerCheckin.dayKey !== todayKey) {
+                exData.partnerCheckin.dayKey = todayKey;
+                exData.partnerCheckin.countToday = 0;
+            }
+            if (!exData.partnerCheckin.enabled) return;
+            const p = exData.partnerCheckin;
+            if (p.countToday >= p.timesPerDay) return;
+            if (p.lastSent) {
+                const diffMs = Date.now() - new Date(p.lastSent).getTime();
+                const minMs = p.minIntervalMin * 60 * 1000;
+                if (diffMs < minMs) return;
+            }
+            const maxMs = p.maxIntervalMin * 60 * 1000;
+            const rand = Math.random();
+            // 触发概率：基于间隔区间的采样
+            if (rand < 0.35) exPartnerNowCheckin();
+        }, 5 * 60 * 1000, 'interval');
+    } else {
+        exPchkTimer = setInterval(() => {
+            /* same logic... */
+            const todayKey = new Date().toDateString();
+            if (exData.partnerCheckin.dayKey !== todayKey) { exData.partnerCheckin.dayKey = todayKey; exData.partnerCheckin.countToday = 0; }
+            if (!exData.partnerCheckin.enabled) return;
+            const p = exData.partnerCheckin;
+            if (p.countToday >= p.timesPerDay) return;
+            if (p.lastSent && Date.now() - new Date(p.lastSent).getTime() < p.minIntervalMin * 60 * 1000) return;
+            if (Math.random() < 0.35) exPartnerNowCheckin();
+        }, 5 * 60 * 1000);
+    }
+}
+
+/* ============ ④主动写信 / ⑤主动提问 ============ */
+function exViewMailbox() {
+    exSetBody(exHeader('✉️ 写信 / 提问', '主动给对方写信、发问题') + `
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:12px;">
+            <button class="ex-primary-btn" style="padding:10px;" onclick="exMailboxNew('letter')">💌 写一封信</button>
+            <button class="ex-primary-btn" style="padding:10px; background:#6c5ce7;" onclick="exMailboxNew('question')">❓ 提一个问题</button>
+        </div>
+        <div id="ex-mailbox-list"></div>
+    `);
+    exMailboxRender();
+}
+window.exMailboxNew = function(kind) {
+    const isLetter = kind === 'letter';
+    const title = isLetter ? '💌 写一封信' : '❓ 提一个问题';
+    const body = document.getElementById('extras-body');
+    body.innerHTML = exHeader(title, '') + `
+        <div style="background:var(--primary-bg); border:1px solid var(--border-color); border-radius:12px; padding:12px; margin-bottom:12px;">
+            <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px;">标题</div>
+            <input id="ex-mb-title" type="text" maxlength="30" placeholder="${isLetter ? '例：今天想对你说的话' : '例：我们第一次见面是什么时候？'}"
+                style="width:100%;padding:8px;border:1px solid var(--border-color);border-radius:8px;background:var(--secondary-bg);color:var(--text-primary);margin-bottom:10px;">
+            <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px;">${isLetter ? '正文内容' : '（可选）问题选项，每行一个'}</div>
+            <textarea id="ex-mb-content" rows="6" placeholder="${isLetter ? '把想说的都写下来吧～' : 'A. 选项1&#10;B. 选项2&#10;C. 选项3'}"
+                style="width:100%;padding:8px;border:1px solid var(--border-color);border-radius:8px;background:var(--secondary-bg);color:var(--text-primary);resize:vertical;"></textarea>
+        </div>
+        <div style="display:flex; gap:8px;">
+            <button class="ex-quick-btn" style="flex:1;" onclick="exViewMailbox()">返回</button>
+            <button class="ex-primary-btn" style="flex:2;" onclick="exMailboxSend('${kind}')">📨 发给对方</button>
+        </div>`;
+};
+window.exMailboxSend = function(kind) {
+    const title = document.getElementById('ex-mb-title').value.trim();
+    const content = document.getElementById('ex-mb-content').value.trim();
+    if (!title) { showNotification('请填写标题', 'warning'); return; }
+    if (!content) { showNotification('内容不能为空', 'warning'); return; }
+    const item = {
+        id: 'mb_' + Date.now(),
+        kind,
+        from: 'me',
+        title, content,
+        answer: null, answeredAt: null,
+        time: new Date().toISOString()
+    };
+    exData.mailbox.unshift(item);
+    if (exData.mailbox.length > 100) exData.mailbox.length = 100;
+    exSave();
+    // 同步到聊天
+    if (typeof addMessage === 'function') {
+        addMessage({
+            id: Date.now(), sender:'user',
+            text: (kind==='letter'?'💌【信】':'❓【提问】') + title + '\n' + content,
+            timestamp: new Date(), status:'sent', type:'mailbox', mailboxId: item.id
+        });
+    }
+    showNotification('已发给对方 ✓', 'success');
+    // 对方收到信/问题 → 回复概率 + 异步回答
+    const replyMs = (3000 + Math.random() * 15000);
+    setTimeout(() => {
+        // 模拟对方读信后给你一条回复消息
+        const replyText = kind === 'letter'
+            ? exGenerateReply(['信收到啦～我会一直珍藏的 💗', '看完后有点感动…呜呜，我也爱你', '你的信我一收到就立刻看了'])
+            : exGenerateReply(['让我想想～其实答案是', '啊？这个问题有点小难，但是我选：A ！哈哈']);
+        item.answer = replyText;
+        item.answeredAt = new Date().toISOString();
+        exSave();
+        if (typeof addMessage === 'function') {
+            addMessage({
+                id: Date.now()+1, sender:'partner',
+                text: (kind==='letter'?'💌 给你回信：':'❓ 回答：') + replyText,
+                timestamp: new Date(), status:'received', type:'normal'
+            });
+        }
+        if (typeof playSound === 'function') playSound('partner_message');
+    }, replyMs);
+    exViewMailbox();
+};
+function exMailboxRender() {
+    const el = document.getElementById('ex-mailbox-list');
+    if (!el) return;
+    if (!exData.mailbox.length) {
+        el.innerHTML = `<div style="font-size:12px;color:var(--text-secondary);text-align:center;padding:30px 0;">还没有信/提问，开始写第一封吧 💌</div>`;
+        return;
+    }
+    el.innerHTML = exData.mailbox.slice(0, 50).map(m => `
+        <div style="background:var(--primary-bg); border:1px solid var(--border-color); border-radius:12px; padding:12px; margin-bottom:10px; cursor:pointer;"
+            onclick="exMailboxView('${m.id}')">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                <div style="font-size:13px;font-weight:600;color:var(--text-primary);">
+                    ${m.kind==='letter'?'💌':'❓'} ${exEscape(m.title)}
+                </div>
+                <div style="font-size:10px;color:var(--text-secondary);">${exFmtDate(m.time)}</div>
+            </div>
+            <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px;">${m.from==='me'?'我 → 对方':'对方 → 我'} · ${m.answer?'已回复':'待回复'}</div>
+            <div style="font-size:12px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">${exEscape(m.content)}</div>
+        </div>
+    `).join('');
+}
+window.exMailboxView = function(id) {
+    const m = exData.mailbox.find(x => x.id === id);
+    if (!m) return;
+    document.getElementById('extras-body').innerHTML = exHeader(m.kind==='letter'?'💌 信件详情':'❓ 提问详情', '') + `
+        <div style="background:var(--primary-bg);border:1px solid var(--border-color);border-radius:12px;padding:14px;margin-bottom:12px;">
+            <div style="font-size:14px;font-weight:700;color:var(--text-primary);margin-bottom:6px;">${exEscape(m.title)}</div>
+            <div style="font-size:10px;color:var(--text-secondary);margin-bottom:10px;">${exFmtDate(m.time)} · ${m.from==='me'?'我 → 对方':'对方 → 我'}</div>
+            <div style="font-size:13px;line-height:1.8;color:var(--text-primary);white-space:pre-wrap;">${exEscape(m.content)}</div>
+        </div>
+        ${m.answer ? `
+        <div style="background:rgba(var(--accent-color-rgb,197,164,126),0.1); border:1px dashed var(--accent-color); border-radius:12px; padding:14px; margin-bottom:12px;">
+            <div style="font-size:12px;color:var(--accent-color);margin-bottom:4px;">
+                ✨ 对方的回复 ${m.answeredAt?' · '+exFmtDate(m.answeredAt):''}
+            </div>
+            <div style="font-size:13px;line-height:1.8;color:var(--text-primary);white-space:pre-wrap;">${exEscape(m.answer)}</div>
+        </div>` : `<div style="text-align:center;color:var(--text-secondary);font-size:12px;padding:20px 0;">对方暂未回复…</div>`}
+        <div style="display:flex;gap:8px;">
+            <button class="ex-quick-btn" style="flex:1;" onclick="exViewMailbox()">返回</button>
+            <button class="ex-quick-btn" style="flex:1;color:#ff6b6b;" onclick="exMailboxDel('${m.id}')">🗑 删除</button>
+        </div>`;
+};
+window.exMailboxDel = function(id) {
+    if (!confirm('删除这条？')) return;
+    exData.mailbox = exData.mailbox.filter(x => x.id !== id);
+    exSave(); exViewMailbox();
+};
+/* 按钮：模拟对方主动写一封信/提问给我 */
+window.exPartnerSendMail = function(kind) {
+    const titles = kind === 'letter'
+        ? ['今天想对你说的话 💗', '一封小情书', '想你了……', '为什么我这么爱你呢？']
+        : ['我最吸引你的地方是什么？', '如果只能选一个，我和奶茶哪个更重要？', '我们第一次约会你记得穿什么吗？', '你有多爱我？ 1-100分'] ;
+    const t = titles[Math.floor(Math.random()*titles.length)];
+    const contents = kind === 'letter'
+        ? ['今天在公司加班到很晚，回去的路上抬头看到月亮，就突然想起你了。\n好像什么事都能和你扯上关系，好奇怪。',
+           '我想了很久，想把攒的每一块小糖都留给你。\n晚安，明天见，不见不散。']
+        : ['提示：这是一个开放题哦，你说的我都会相信的～'];
+    const c = contents[Math.floor(Math.random()*contents.length)];
+    const item = { id:'mb_'+Date.now(), kind, from:'partner', title:t, content:c, answer:null, answeredAt:null, time:new Date().toISOString() };
+    exData.mailbox.unshift(item);
+    if (exData.mailbox.length > 100) exData.mailbox.length = 100;
+    exSave();
+    if (typeof addMessage === 'function') {
+        addMessage({
+            id: Date.now(), sender:'partner',
+            text:(kind==='letter'?'💌【信】':'❓【提问】')+t+'\n'+c,
+            timestamp:new Date(), status:'received', type:'mailbox'
+        });
+    }
+    showNotification(`${exPartnerName()} 来了一封${kind==='letter'?'信':'提问'}📩`, 'success', 3500);
+    if (typeof playSound === 'function') playSound('partner_message');
+};
+
+/* ============ ⑤邀请陪伴：工作/学习/运动/睡觉 ============ */
+const EX_INVITE_SCENES = {
+    work:     { icon:'💻', name:'一起工作',   dur:30 },
+    study:    { icon:'📚', name:'一起学习',   dur:45 },
+    exercise: { icon:'🏃', name:'一起运动',   dur:30 },
+    sleep:    { icon:'🌙', name:'一起睡觉',   dur:60 },
+};
+function exViewInvitations() {
+    exSetBody(exHeader('🤝 陪伴邀请', '对方可以邀你工作/学习/运动/睡觉') + `
+        <div style="background:var(--primary-bg);border:1px solid var(--border-color);border-radius:12px;padding:12px;margin-bottom:12px;">
+            <div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px;">📨 对方邀请你（模拟）</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+                ${Object.entries(EX_INVITE_SCENES).map(([k,v]) =>
+                    `<button class="ex-quick-btn" style="padding:10px;" onclick="exPartnerInvite('${k}')">${v.icon} ${v.name}</button>`
+                ).join('')}
+            </div>
+        </div>
+        <div id="ex-invitation-list"></div>
+    `);
+    exInvRender();
+}
+window.exPartnerInvite = function(kind) {
+    const s = EX_INVITE_SCENES[kind];
+    if (!s) return;
+    const inv = {
+        id:'inv_'+Date.now(), type:kind, durationMin:s.dur,
+        status:'pending', from:'partner',
+        time:new Date().toISOString(), replyAt:null
+    };
+    exData.invitations.unshift(inv);
+    if (exData.invitations.length > 50) exData.invitations.length = 50;
+    exSave();
+    // 聊天消息
+    if (typeof addMessage === 'function') {
+        addMessage({
+            id: Date.now(), sender:'partner',
+            text:`🤝 陪我 ${s.name} 好不好？\n时长 ${s.dur} 分钟，愿意就点"接受"吧～`,
+            timestamp:new Date(), status:'received', type:'invitation', invitationId:inv.id
+        });
+    }
+    showNotification(`${exPartnerName()} 邀你 ${s.name}`, 'success', 3500);
+    if (typeof playSound === 'function') playSound('partner_message');
+    exInvRender();
+};
+window.exInvReply = function(id, accept) {
+    const inv = exData.invitations.find(x => x.id === id);
+    if (!inv || inv.status !== 'pending') return;
+    inv.status = accept ? 'accepted' : 'rejected';
+    inv.replyAt = new Date().toISOString();
+    exSave();
+    const s = EX_INVITE_SCENES[inv.type];
+    if (accept) {
+        showNotification(`已接受，开始${s.name}模式 ✅`, 'success');
+        // 自动跳转「陪伴」模式一起（together.js）
+        if (typeof togLaunch === 'function') {
+            try { togLaunch(inv.type, inv.durationMin); } catch(e) {
+                showNotification('陪伴模式正在启动', 'info');
+            }
+        } else if (typeof window.togLaunch === 'function') {
+            try { window.togLaunch(inv.type, inv.durationMin); } catch(e){}
+        }
+    } else {
+        showNotification('已婉拒 👋', 'info');
+    }
+    if (typeof addMessage === 'function') {
+        addMessage({
+            id: Date.now(), sender:'user',
+            text: accept ? `已接受：${s.name}（${inv.durationMin}分钟）` : '暂时不可以，下一次好吗？',
+            timestamp: new Date(), status:'sent', type:'normal'
+        });
+    }
+    exInvRender();
+};
+function exInvRender() {
+    const el = document.getElementById('ex-invitation-list');
+    if (!el) return;
+    if (!exData.invitations.length) {
+        el.innerHTML = `<div style="font-size:12px;color:var(--text-secondary);text-align:center;padding:30px 0;">暂无邀请～</div>`;
+        return;
+    }
+    el.innerHTML = exData.invitations.slice(0, 30).map(inv => {
+        const s = EX_INVITE_SCENES[inv.type] || {icon:'🤝', name:inv.type};
+        const statusMap = { pending: '等待回复', accepted:'✅ 已接受', rejected:'❌ 已拒绝' };
+        const actions = inv.status === 'pending' ? `
+            <div style="display:flex;gap:6px;margin-top:8px;">
+                <button class="ex-primary-btn" style="flex:1;padding:8px 10px;font-size:12px;" onclick="exInvReply('${inv.id}',true)">✅ 接受</button>
+                <button class="ex-quick-btn" style="flex:1;padding:8px 10px;font-size:12px;color:#ff6b6b;" onclick="exInvReply('${inv.id}',false)">❌ 婉拒</button>
+            </div>` : '';
+        return `
+        <div style="background:var(--primary-bg);border:1px solid var(--border-color);border-radius:12px;padding:12px;margin-bottom:10px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                <div style="font-size:13px;font-weight:600;color:var(--text-primary);">${s.icon} ${s.name} · ${inv.durationMin}分钟</div>
+                <div style="font-size:11px;color:var(--text-secondary);">${statusMap[inv.status] || inv.status}</div>
+            </div>
+            <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px;">
+                ${inv.from==='partner'?'对方发起':'我发起'} · ${exFmtDate(inv.time)}
+            </div>
+            ${actions}
+        </div>`;
+    }).join('');
+}
+
+/* ============ ⑥通话记录（call.js 调用，聊天页查看） ============ */
+/* 公开接口：exAddCallRecord({type, durationSec, result, from}) */
+window.exAddCallRecord = function(o) {
+    if (!o) return;
+    const rec = {
+        id:'call_'+Date.now()+'_'+Math.floor(Math.random()*10000),
+        type: o.type || 'voice',
+        durationSec: o.durationSec || 0,
+        startedAt: o.startedAt || new Date().toISOString(),
+        endedAt: o.endedAt || new Date().toISOString(),
+        result: o.result || 'ended',
+        from: o.from || 'me'
+    };
+    exData.callRecords.unshift(rec);
+    if (exData.callRecords.length > 200) exData.callRecords.length = 200;
+    exSave();
+};
+function exViewCallRecords() {
+    const total = exData.callRecords.length;
+    const connected = exData.callRecords.filter(r => r.result === 'connected' || r.result === 'ended').length;
+    const totalSec = exData.callRecords.reduce((s,r) => s + (r.durationSec||0), 0);
+    const fmtDur = (sec) => {
+        if (sec < 60) return sec + '秒';
+        const m = Math.floor(sec/60), s = sec%60;
+        if (m < 60) return m + '分' + s + '秒';
+        return Math.floor(m/60) + '时' + (m%60) + '分';
+    };
+    exSetBody(exHeader('📞 通话记录', `共 ${total} 通 · ${fmtDur(totalSec)}`) + `
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:14px;">
+            <div style="background:var(--primary-bg);border:1px solid var(--border-color);border-radius:10px;padding:10px;text-align:center;">
+                <div style="font-size:18px;font-weight:700;color:var(--text-primary);">${total}</div>
+                <div style="font-size:10px;color:var(--text-secondary);">总通话次数</div>
+            </div>
+            <div style="background:var(--primary-bg);border:1px solid var(--border-color);border-radius:10px;padding:10px;text-align:center;">
+                <div style="font-size:18px;font-weight:700;color:#2ecc71;">${connected}</div>
+                <div style="font-size:10px;color:var(--text-secondary);">接通次数</div>
+            </div>
+            <div style="background:var(--primary-bg);border:1px solid var(--border-color);border-radius:10px;padding:10px;text-align:center;">
+                <div style="font-size:18px;font-weight:700;color:var(--accent-color);">${fmtDur(totalSec)}</div>
+                <div style="font-size:10px;color:var(--text-secondary);">累计时长</div>
+            </div>
+        </div>
+        <div id="ex-call-list"></div>
+        <div style="margin-top:14px;display:flex;gap:8px;">
+            <button class="ex-quick-btn" style="flex:1;" onclick="exExportJson('callRecords','通话记录')">📤 导出JSON</button>
+            <button class="ex-quick-btn" style="flex:1;color:#ff6b6b;" onclick="exClearCalls()">🗑 清空记录</button>
+        </div>
+    `);
+    const listEl = document.getElementById('ex-call-list');
+    if (!exData.callRecords.length) {
+        listEl.innerHTML = `<div style="font-size:12px;color:var(--text-secondary);text-align:center;padding:30px 0;">还没有通话记录～</div>`;
+        return;
+    }
+    listEl.innerHTML = exData.callRecords.slice(0, 100).map(r => {
+        const icon = r.type === 'video' ? '📹' : '📞';
+        const resultText = { connected:'接通', ended:'接通后结束', missed:'未接', rejected:'拒接', canceled:'取消' }[r.result] || r.result;
+        const colorMap = { connected:'#2ecc71', ended:'#3498db', missed:'#e74c3c', rejected:'#e67e22', canceled:'#95a5a6' };
+        return `
+        <div style="background:var(--primary-bg);border:1px solid var(--border-color);border-radius:10px;padding:10px 12px;margin-bottom:8px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+                <div>
+                    <div style="font-size:13px;color:var(--text-primary);font-weight:600;">
+                        ${icon} ${r.from==='me'?'我呼出去':'对方打进来'} · ${r.type==='video'?'视频':'语音'}
+                    </div>
+                    <div style="font-size:11px;color:var(--text-secondary);">${exFmtDate(r.startedAt)} · ${fmtDur(r.durationSec)}</div>
+                </div>
+                <div style="font-size:11px;color:${colorMap[r.result]||'#888'};">${resultText}</div>
+            </div>
+        </div>`;
+    }).join('');
+}
+window.exClearCalls = function() {
+    if (!confirm('清空所有通话记录？')) return;
+    exData.callRecords = []; exSave(); exViewCallRecords();
+    showNotification('已清空通话记录', 'success');
+};
+
+/* ============ ⑦各板块一键导出 ============ */
+function _exDownload(filename, text, mime) {
+    const blob = new Blob([text], { type: mime || 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 500);
+}
+window.exExportJson = function(field, label) {
+    const data = exData[field];
+    const fn = `${label||field}_${new Date().toISOString().slice(0,10)}.json`;
+    _exDownload(fn, JSON.stringify(data, null, 2), 'application/json');
+    showNotification(fn + ' 已导出', 'success');
+};
+window.exExportAll = function() {
+    const out = { exportedAt: new Date().toISOString(), exData: exData, messages: null, settings: null };
+    if (typeof messages !== 'undefined') out.messages = messages;
+    if (typeof settings !== 'undefined') out.settings = settings;
+    _exDownload(`全部导出_${new Date().toISOString().slice(0,10)}.json`,
+        JSON.stringify(out, null, 2), 'application/json');
+    showNotification('全部数据已导出', 'success');
+};
+window.exExportMsgText = function() {
+    if (typeof messages === 'undefined') { showNotification('消息不可用','warning'); return; }
+    const lines = messages.map(m => {
+        const t = new Date(m.timestamp).toLocaleString();
+        const sender = m.sender === 'user' ? '我' : (typeof exPartnerName === 'function' ? exPartnerName() : '对方');
+        const body = m.text ? m.text : (m.image ? '[图片]' : '[系统消息]');
+        return `[${t}] ${sender}：${body}`;
+    });
+    _exDownload(`聊天记录_${new Date().toISOString().slice(0,10)}.txt`, lines.join('\n'), 'text/plain');
+    showNotification('聊天记录已导出', 'success');
+};
+function exHtmlExportPanel() {
+    const items = [
+        { k:'redpackets', l:'🧧 红包记录' },
+        { k:'qaHistory',  l:'❓ 问答历史' },
+        { k:'journals',   l:'🪶 觉察日志' },
+        { k:'periodLogs', l:'🩸 月经记录' },
+        { k:'messageBoard',l:'📌 留言板' },
+        { k:'shopSent',   l:'🎁 送礼物记录' },
+        { k:'checkinHistory', l:'🔍 查岗记录' },
+        { k:'callRecords',l:'📞 通话记录' },
+        { k:'mailbox',    l:'✉️ 信/提问' },
+        { k:'invitations',l:'🤝 陪伴邀请' },
+        { k:'links',      l:'🔗 分享链接' },
+    ];
+    return `
+    <div style="background:var(--primary-bg);border:1px solid var(--border-color);border-radius:12px;padding:12px;margin-bottom:14px;">
+        <div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px;">📤 各板块一键导出（JSON / TXT）</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px;">
+            ${items.map(x => `<button class="ex-quick-btn" style="padding:8px 10px;font-size:12px;text-align:left;" onclick="exExportJson('${x.k}','${x.l}')">${x.l}</button>`).join('')}
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;">
+            <button class="ex-primary-btn" style="padding:9px;font-size:12px;" onclick="exExportAll()">💾 一键：全部数据(JSON)</button>
+            <button class="ex-quick-btn" style="padding:9px;font-size:12px;" onclick="exExportMsgText()">💬 聊天记录(TXT)</button>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+            <button class="ex-quick-btn" style="padding:9px;font-size:12px;" onclick="exExportReading()">📖 一起读书(JSON)</button>
+            <button class="ex-quick-btn" style="padding:9px;font-size:12px;" onclick="exExportMoments()">🌈 朋友圈(JSON)</button>
+        </div>
+    </div>`;
+}
+
+/* 一起读书导出 */
+window.exExportReading = function() {
+    const data = exData.reading || { books: [] };
+    const fn = `一起读书_${new Date().toISOString().slice(0,10)}.json`;
+    _exDownload(fn, JSON.stringify(data, null, 2), 'application/json');
+    showNotification('一起读书数据已导出', 'success');
+};
+/* 朋友圈导出 —— 调 moments 模块里的 API，若不存在则 fallback */
+window.exExportMoments = function() {
+    const dump = async () => {
+        if (typeof window.openMoments === 'function' && !momLoaded) await momLoad();
+        let md;
+        try { md = (typeof momData !== 'undefined') ? momData : null; } catch(e) {}
+        if (!md) {
+            try {
+                if (typeof getStorageKey === 'function')
+                    md = await localforage.getItem(getStorageKey('momentsData'));
+            } catch(_) {}
+        }
+        const fn = `朋友圈_${new Date().toISOString().slice(0,10)}.json`;
+        _exDownload(fn, JSON.stringify(md || {}, null, 2), 'application/json');
+        showNotification('朋友圈数据已导出', 'success');
+    };
+    dump();
+};
+
+/* ============ ⑧独立会话 + 头像名字修改 ============ */
+/* 新增主会话按钮放在聊天设置 / 功能百宝箱 "我的会话" 页面 */
+function exViewSessions() {
+    // 同时提供头像/名字修改
+    const savedName = (typeof settings !== 'undefined' && settings.partnerName) ? settings.partnerName : '';
+    exSetBody(exHeader('💬 私聊会话 & 对方资料', '') + `
+        <div style="background:var(--primary-bg);border:1px solid var(--border-color);border-radius:12px;padding:12px;margin-bottom:14px;">
+            <div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px;">🎭 对方资料（名字+头像）</div>
+            <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px;">
+                <div id="ex-pp-avatar-preview" style="width:56px;height:56px;border-radius:50%;background:var(--secondary-bg);display:flex;align-items:center;justify-content:center;font-size:26px;overflow:hidden;cursor:pointer;"
+                    title="点击修改" onclick="document.getElementById('ex-pp-avatar-file').click()">
+                    🧸
+                </div>
+                <div style="flex:1;min-width:0;">
+                    <div style="font-size:10px;color:var(--text-secondary);margin-bottom:4px;">对方名字</div>
+                    <input id="ex-pp-name" type="text" value="${exEscape(savedName)}" maxlength="16" placeholder="留空使用默认"
+                        style="width:100%;padding:8px;border:1px solid var(--border-color);border-radius:8px;background:var(--secondary-bg);color:var(--text-primary);">
+                </div>
+            </div>
+            <input type="file" accept="image/*" id="ex-pp-avatar-file" style="display:none;" onchange="exPartnerAvatarUpload(this)">
+            <button class="ex-primary-btn" style="width:100%;padding:8px;font-size:12px;" onclick="exSavePartnerProfile()">💾 保存</button>
+            <div style="font-size:10px;color:var(--text-secondary);margin-top:6px;">💡 这里修改的名字会同步到红包/消息界面所有位置</div>
+        </div>
+
+        <div style="background:var(--primary-bg);border:1px solid var(--border-color);border-radius:12px;padding:12px;margin-bottom:14px;">
+            <div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px;">📋 独立私聊会话列表</div>
+            <div style="margin-bottom:10px;display:flex;gap:6px;">
+                <input id="ex-pm-new-name" type="text" maxlength="20" placeholder="新会话名，如「悄悄话」"
+                    style="flex:1;padding:8px;border:1px solid var(--border-color);border-radius:8px;background:var(--secondary-bg);color:var(--text-primary);">
+                <button class="ex-primary-btn" style="padding:8px 14px;font-size:12px;" onclick="exPmNew()">＋ 新建</button>
+            </div>
+            <div id="ex-pm-list"></div>
+        </div>
+
+        <div id="ex-pm-chat" style="display:none;"></div>
+    `);
+    exPmRenderList();
+    // 同步头像预览
+    setTimeout(() => {
+        if (typeof settings !== 'undefined' && settings.partnerAvatar) {
+            const p = document.getElementById('ex-pp-avatar-preview');
+            if (p) p.innerHTML = `<img src="${settings.partnerAvatar}" style="width:100%;height:100%;object-fit:cover;">`;
+        }
+    }, 60);
+}
+window.exPartnerAvatarUpload = function(input) {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    const r = new FileReader();
+    r.onload = () => {
+        const data = r.result;
+        const preview = document.getElementById('ex-pp-avatar-preview');
+        if (preview) preview.innerHTML = `<img src="${data}" style="width:100%;height:100%;object-fit:cover;">`;
+        window._exPpAvatarTmp = data;
+        showNotification('已选头像，点击保存以生效', 'info');
+    };
+    r.readAsDataURL(file);
+    input.value = '';
+};
+window.exSavePartnerProfile = function() {
+    const name = document.getElementById('ex-pp-name').value.trim();
+    const avatar = window._exPpAvatarTmp || (typeof settings !== 'undefined' ? settings.partnerAvatar : null);
+    if (typeof settings !== 'undefined') {
+        settings.partnerName = name || settings.partnerName || '';
+        settings.partnerAvatar = avatar || settings.partnerAvatar || null;
+        if (typeof throttledSaveData === 'function') throttledSaveData();
+    }
+    // 同步到 core.js 全局 name 管理函数
+    if (typeof updatePartnerNameUI === 'function') updatePartnerNameUI();
+    if (typeof updatePartnerAvatarUI === 'function') updatePartnerAvatarUI();
+    // 刷新 header
+    if (typeof refreshHeader === 'function') { try { refreshHeader(); } catch(e) {} }
+    showNotification('对方资料已更新 ✓', 'success');
+    window._exPpAvatarTmp = null;
+};
+window.exPmNew = function() {
+    const name = document.getElementById('ex-pm-new-name').value.trim();
+    if (!name) { showNotification('会话名不能为空', 'warning'); return; }
+    const pm = {
+        id:'pm_'+Date.now(),
+        name, avatar:null, desc:'',
+        createdAt:new Date().toISOString(),
+        messages:[]
+    };
+    exData.pms.unshift(pm);
+    exSave();
+    document.getElementById('ex-pm-new-name').value = '';
+    exPmRenderList();
+    showNotification('会话已创建 ✓', 'success');
+};
+function exPmRenderList() {
+    const el = document.getElementById('ex-pm-list');
+    if (!el) return;
+    if (!exData.pms.length) {
+        el.innerHTML = `<div style="font-size:12px;color:var(--text-secondary);text-align:center;padding:20px 0;">还没有独立会话～</div>`;
+        return;
+    }
+    el.innerHTML = exData.pms.map(pm => `
+        <div style="background:var(--secondary-bg);border:1px solid var(--border-color);border-radius:10px;padding:10px;margin-bottom:8px;display:flex;align-items:center;gap:10px;">
+            <div style="width:40px;height:40px;border-radius:50%;background:var(--primary-bg);display:flex;align-items:center;justify-content:center;">
+                ${pm.avatar ? `<img src="${pm.avatar}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">` : '💬'}
+            </div>
+            <div style="flex:1;min-width:0;cursor:pointer;" onclick="exPmOpen('${pm.id}')">
+                <div style="font-size:13px;font-weight:600;color:var(--text-primary);">${exEscape(pm.name)}</div>
+                <div style="font-size:11px;color:var(--text-secondary);">${pm.messages.length} 条消息 · ${exFmtDate(pm.createdAt)}</div>
+            </div>
+            <button class="ex-quick-btn" style="padding:4px 8px;font-size:10px;color:#ff6b6b;" onclick="exPmDel('${pm.id}')">删</button>
+        </div>
+    `).join('');
+}
+window.exPmDel = function(id) {
+    if (!confirm('删除这个会话？')) return;
+    exData.pms = exData.pms.filter(p => p.id !== id);
+    if (exData.currentPmId === id) { exData.currentPmId = null; document.getElementById('ex-pm-chat').style.display='none'; }
+    exSave(); exPmRenderList();
+};
+window.exPmOpen = function(id) {
+    const pm = exData.pms.find(p => p.id === id);
+    if (!pm) return;
+    exData.currentPmId = id;
+    const chatEl = document.getElementById('ex-pm-chat');
+    chatEl.style.display = '';
+    chatEl.innerHTML = `
+        <div style="background:var(--primary-bg);border:1px solid var(--border-color);border-radius:12px;padding:12px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                <div style="font-size:13px;font-weight:600;color:var(--text-primary);">💬 ${exEscape(pm.name)}</div>
+                <button class="ex-quick-btn" style="padding:4px 10px;font-size:10px;" onclick="exPmClose()">× 关闭</button>
+            </div>
+            <div id="ex-pm-msgs" style="max-height:320px;overflow:auto;border:1px solid var(--border-color);border-radius:8px;padding:8px;background:var(--secondary-bg);margin-bottom:10px;"></div>
+            <div style="display:flex;gap:6px;">
+                <input id="ex-pm-input" type="text" placeholder="写点什么..."
+                    style="flex:1;padding:8px;border:1px solid var(--border-color);border-radius:8px;background:var(--secondary-bg);color:var(--text-primary);"
+                    onkeydown="if(event.key==='Enter')exPmSend()">
+                <button class="ex-primary-btn" style="padding:8px 14px;font-size:12px;" onclick="exPmSend()">发送</button>
+            </div>
+        </div>`;
+    exPmRenderMessages();
+};
+window.exPmClose = function() {
+    exData.currentPmId = null;
+    document.getElementById('ex-pm-chat').style.display = 'none';
+};
+window.exPmSend = function() {
+    const pm = exData.pms.find(p => p.id === exData.currentPmId);
+    if (!pm) return;
+    const input = document.getElementById('ex-pm-input');
+    const text = input.value.trim();
+    if (!text) return;
+    pm.messages.push({ id:'m_'+Date.now(), sender:'user', text, time:new Date().toISOString() });
+    if (pm.messages.length > 500) pm.messages.splice(0, pm.messages.length-500);
+    input.value = '';
+    exSave(); exPmRenderMessages();
+    // 会话回复模拟
+    setTimeout(() => {
+        const reply = exGenerateReply([
+            '收到啦～',
+            '嗯嗯，我知道了',
+            '你说话真可爱，哈哈',
+            '嘿嘿，我也这么想的～'
+        ]);
+        pm.messages.push({ id:'m_'+Date.now()+'r', sender:'partner', text:reply, time:new Date().toISOString() });
+        exSave(); exPmRenderMessages();
+    }, 2000 + Math.random()*3000);
+};
+function exPmRenderMessages() {
+    const pm = exData.pms.find(p => p.id === exData.currentPmId);
+    if (!pm) return;
+    const el = document.getElementById('ex-pm-msgs');
+    if (!el) return;
+    if (!pm.messages.length) {
+        el.innerHTML = `<div style="font-size:11px;color:var(--text-secondary);text-align:center;padding:20px;">会话空空，开始聊天吧～</div>`;
+        return;
+    }
+    el.innerHTML = pm.messages.map(m => {
+        const mine = m.sender === 'user';
+        return `
+        <div style="display:flex;justify-content:${mine?'flex-end':'flex-start'};margin-bottom:6px;">
+            <div style="max-width:72%;padding:6px 10px;border-radius:10px;
+                background:${mine?'var(--accent-color)':'var(--primary-bg)'};
+                color:${mine?'#fff':'var(--text-primary)'};
+                font-size:12px;line-height:1.5;white-space:pre-wrap;word-break:break-word;">
+                ${exEscape(m.text)}
+                <div style="font-size:9px;opacity:0.7;text-align:${mine?'right':'left'};margin-top:2px;">${exFmtDate(m.time)}</div>
+            </div>
+        </div>`;
+    }).join('');
+    setTimeout(() => { el.scrollTop = el.scrollHeight; }, 30);
+}
+
+/* ============ 状态页拼装：把新模块插入时间状态页 ============ */
+/* 原 exViewStatus 里添加节奏设置 + 对方查岗 + 导出 + 会话入口 + 写信/邀请按钮
+   我们扩展：exHome() 把新增功能加进百宝箱卡片 */
+(function hookExHomeItems() {
+    // 保证这些 UI 函数在 exItems 列表上挂载
+    const extras = {
+        rhythm: { key:'rhythm', icon:'fa-clock', name:'节奏设置', desc:'我的/对方节奏独立调', color:'#6c5ce7', view:() => {
+            exSetBody(exHeader('⏱️ 节奏设置', '我和对方独立调节') +
+                exHtmlRhythmPanel() +
+                exHtmlPartnerCheckinPanel() +
+                exHtmlExportPanel());
+        }},
+        calllog: { key:'calllog', icon:'fa-phone', name:'通话记录', desc:'次数/时长 可导出', color:'#2ecc71', view: exViewCallRecords },
+        mailbox: { key:'mailbox', icon:'fa-envelope', name:'写信/提问', desc:'主动给对方写信', color:'#e17055', view: exViewMailbox },
+        invite: { key:'invite', icon:'fa-handshake', name:'陪伴邀请', desc:'对方邀你工作学习', color:'#00b894', view: exViewInvitations },
+        sessions: { key:'sessions', icon:'fa-comments', name:'私聊会话', desc:'独立会话 + 头像', color:'#0984e3', view: exViewSessions },
+        moments: { key:'moments', icon:'fa-users', name:'朋友圈', desc:'发图/换背景/签名', color:'#fd79a8', view:() => {
+            exSetBody(exHeader('🌈 朋友圈', '发图、留言、换封面') + `
+                <div style="background:var(--secondary-bg);border:1px solid var(--border-color);border-radius:12px;padding:14px;margin-bottom:14px;">
+                    <div style="font-size:13px;color:var(--text-secondary);margin-bottom:10px;">独立的朋友圈界面，双方可发文字/图片、互相点赞留言、修改背景与签名。</div>
+                    <button class="ex-primary-btn" style="width:100%;padding:10px 12px;font-size:13px;border-radius:10px;" onclick="window.openMoments()">📸 打开朋友圈</button>
+                </div>`);
+        }},
+    };
+    // 如果 exItems 存在则插入
+    if (typeof EX_FEATURES !== 'undefined') {
+        Object.values(extras).forEach(x => {
+            if (!EX_FEATURES.find(f => f.key === x.key)) EX_FEATURES.push(x);
+        });
+    } else if (typeof window.EX_FEATURES !== 'undefined') {
+        Object.values(extras).forEach(x => {
+            if (!window.EX_FEATURES.find(f => f.key === x.key)) window.EX_FEATURES.push(x);
+        });
+    }
+    // 映射到 exViews 视图
+    if (typeof exViews !== 'undefined') {
+        Object.values(extras).forEach(x => { if (!exViews[x.key]) exViews[x.key] = x.view; });
+    } else if (typeof window.exViews !== 'undefined') {
+        Object.values(extras).forEach(x => { if (!window.exViews[x.key]) window.exViews[x.key] = x.view; });
+    }
+})();
+
 window.initExtras = async function() {
     await exLoad();
-    // 应用回复速度到全局设置
+    // 应用回复速度到全局设置（从我的/对方节奏读取）
     if (typeof settings !== 'undefined') {
-        const cfg = EX_REPLY_SPEEDS[exData.replySpeed] || EX_REPLY_SPEEDS.normal;
-        settings.replyDelayMin = cfg.min;
-        settings.replyDelayMax = cfg.max;
+        const pr = exData.partnerRhythm;
+        if (pr) {
+            settings.replyDelayMin = pr.customMin;
+            settings.replyDelayMax = pr.customMax;
+        } else {
+            const cfg = EX_REPLY_SPEEDS[exData.replySpeed] || EX_REPLY_SPEEDS.normal;
+            settings.replyDelayMin = cfg.min;
+            settings.replyDelayMax = cfg.max;
+        }
     }
-    // 如果后台推送已开启，启动轮询
-    if (exData.bgPush.enabled) exStartPushLoop();
+    // 后台推送（功能已移除，保留兼容性空语句避免历史配置报错）
+    // 如果后台推送已开启，启动轮询（已废弃）
+    // if (exData.bgPush.enabled) exStartPushLoop();
+    // 启动模拟定时器
+    try { exPartnerStartSendingRp(); } catch(e) { console.warn('[extras] 红包双向模拟启动失败', e); }
+    try { exPartnerStartCheckin(); } catch(e) { console.warn('[extras] 对方查岗启动失败', e); }
+    try { window.exPartnerStartFavLoop(); } catch(e) { console.warn('[extras] 对方收藏启动失败', e); }
 };
 // 启动时自动加载（容错）
 document.addEventListener('DOMContentLoaded', () => {

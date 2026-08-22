@@ -224,10 +224,8 @@ window.ddClear = function() {
 /* ============ 发送到聊天 ============ */
 window.ddSendToPartner = function() {
     if (!ddCanvas) return;
-    // 简单防空白：历史只有初始1条且无后续 → 提示
     if (ddHistory.length < 2) { showNotification('画布是空的，先画点什么吧 ✏️', 'warning'); return; }
     const dataURL = ddCanvas.toDataURL('image/png');
-    // 发到聊天消息流（createMessageFragment 原生支持 msg.image）
     if (typeof addMessage === 'function') {
         addMessage({
             id: Date.now(),
@@ -242,25 +240,54 @@ window.ddSendToPartner = function() {
     if (typeof playSound === 'function') playSound('send');
     hideModal(document.getElementById('doodle-modal'));
     showNotification('涂鸦已发送给 ' + ddPartnerName(), 'success');
-    // 对方概率回一幅涂鸦
-    if (Math.random() < 0.65) {
+    // 对方不一定回——"不是我画一个就必须回一个"
+    // 约 40% 概率延迟回复（对方也在随便画），其余不回
+    if (Math.random() < 0.4) {
         setTimeout(() => {
-            const replyURL = ddGeneratePartnerDoodle();
-            if (typeof addMessage === 'function') {
-                addMessage({
-                    id: Date.now() + 1,
-                    sender: 'partner',
-                    text: '',
-                    image: replyURL,
-                    timestamp: new Date(),
-                    status: 'received',
-                    type: 'normal'
-                });
-            }
-            if (typeof playSound === 'function') playSound('partner_message');
-            showNotification(ddPartnerName() + ' 回了你一幅涂鸦 🎨', 'success', 4000);
-        }, 1500 + Math.random() * 2500);
+            ddPartnerSendRandomDoodle(true);
+        }, 5000 + Math.random() * 15000);
     }
+};
+
+/* 对方主动/随机画画：时间/数量/内容随意画（不绑定我的操作） */
+let ddPartnerDrawTimer = null;
+function ddPartnerStartIdleDraws() {
+    if (ddPartnerDrawTimer) return;
+    const loop = () => {
+        const next = 60000 + Math.random() * 180000; // 1~4 分钟随机画一张（时间随意）
+        if (window.__PerfManager) {
+            ddPartnerDrawTimer = window.__PerfManager.registerTimer(() => {
+                if (window.__PerfManager.isPaused) return;
+                ddPartnerSendRandomDoodle(false);
+                if (window.__PerfManager && ddPartnerDrawTimer) window.__PerfManager.unregisterTimer(ddPartnerDrawTimer);
+                ddPartnerDrawTimer = null;
+                ddPartnerStartIdleDraws();
+            }, next, 'timeout');
+        } else {
+            ddPartnerDrawTimer = setTimeout(() => {
+                ddPartnerSendRandomDoodle(false);
+                ddPartnerDrawTimer = null;
+                ddPartnerStartIdleDraws();
+            }, next);
+        }
+    };
+    loop();
+}
+window.ddPartnerSendRandomDoodle = function(isReply) {
+    const replyURL = ddGeneratePartnerDoodle();
+    if (typeof addMessage === 'function') {
+        addMessage({
+            id: Date.now() + Math.floor(Math.random() * 999),
+            sender: 'partner',
+            text: isReply ? '' : '（想画点什么给你～）',
+            image: replyURL,
+            timestamp: new Date(),
+            status: 'received',
+            type: 'normal'
+        });
+    }
+    if (typeof playSound === 'function') playSound('partner_message');
+    showNotification(ddPartnerName() + (isReply ? ' 回了你一幅涂鸦 🎨' : ' 画了一幅画给你 🎨'), 'success', 4000);
 };
 
 /* ============ 生成对方涂鸦（抽象随机画作） ============ */
@@ -303,10 +330,11 @@ function ddGeneratePartnerDoodle() {
     return c.toDataURL('image/png');
 }
 
-/* ============ 绑定主页画笔按钮 ============ */
+/* ============ 绑定主页画笔按钮 + 启动对方主动画画机制 ============ */
 document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => {
         const btn = document.getElementById('doodle-btn');
         if (btn) btn.addEventListener('click', () => window.openDoodle());
     }, 1000);
+    setTimeout(() => { try { ddPartnerStartIdleDraws(); } catch (e) {} }, 12000);
 });

@@ -635,6 +635,17 @@ html:not([data-theme="dark"])[data-color-theme="black-white"] .message-sent{
     function endCall() {
         if (!S.active) return;
         const dur = S.elapsed;
+        const startedAt = S.startTime ? new Date(S.startTime).toISOString() : new Date(Date.now() - dur).toISOString();
+        const endedAt = new Date().toISOString();
+        const from = S.isPartnerCall ? 'partner' : 'me';
+        // 判断结果：接通/未接/取消
+        let result = 'ended';
+        if (dur <= 0 || !S.startTime) {
+            // 没接通（例如直接被对方拒）
+            result = 'canceled';
+        } else if (dur > 0 && !S.startTime) {
+            result = 'missed';
+        }
         S.active = false; S.startTime = null;
         cancelAnimationFrame(S.timerRAF);
         clearTimeout(S.connectingTimer); clearTimeout(S.incomingTimer);
@@ -654,6 +665,16 @@ html:not([data-theme="dark"])[data-color-theme="black-white"] .message-sent{
         localStorage.setItem(KEY_POS,  JSON.stringify(S.pos));
         localStorage.setItem(KEY_SIZE, JSON.stringify(S.size));
         sendCallMsg(dur);
+        // 记录通话记录
+        try {
+            if (typeof window.exAddCallRecord === 'function') {
+                window.exAddCallRecord({
+                    type: S.callType || 'video',
+                    durationSec: Math.round(dur / 1000),
+                    startedAt, endedAt, result, from
+                });
+            }
+        } catch(_) {}
         if (typeof showNotification === 'function' && dur > 1500)
             showNotification(`通话结束 · ${fmt(dur)}`, 'info', 3000);
         else if (typeof showNotification === 'function' && dur <= 1500 && dur > 0)
@@ -833,6 +854,18 @@ html:not([data-theme="dark"])[data-color-theme="black-white"] .message-sent{
             clearTimeout(S.incomingTimer);
             const myName = (typeof settings !== 'undefined' && settings.myName) || '我';
             sendCallEvent('fa-phone-slash', `${myName}拒绝了 ${getName()} 的通话`, null);
+            try {
+                if (typeof window.exAddCallRecord === 'function') {
+                    window.exAddCallRecord({
+                        type: S.callType || 'video',
+                        durationSec: 0,
+                        startedAt: new Date().toISOString(),
+                        endedAt: new Date().toISOString(),
+                        result: 'rejected',
+                        from: 'partner'
+                    });
+                }
+            } catch(_) {}
         });
         document.getElementById('call-inc-accept')?.addEventListener('click', () => {
             document.getElementById('call-incoming-overlay')?.classList.remove('visible');

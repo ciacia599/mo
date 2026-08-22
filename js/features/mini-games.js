@@ -296,23 +296,38 @@ function mgRpsJudge(p, a) {
 /* ======================== 游戏 2：五子棋 ======================== */
 
 const MG_GOMOKU_SIZE = 15;
-let mgGomokuBoard = [];   // 0 空 / 1 玩家(黑) / 2 AI(白)
+let mgGomokuBoard = [];   // 0 空 / 1 玩家1(黑) / 2 玩家2(白)
 let mgGomokuOver = false;
 let mgGomokuLocked = false;
+let mgGomokuMode = 'pvp';    // 'ai' 人机，'pvp' 双人对战（一人操控两方，模拟对方陪你下棋）
+let mgGomokuTurn = 1;       // 1=黑方/我，2=白方/对方
 
 function mgGomokuInit() {
     mgGomokuBoard = Array.from({ length: MG_GOMOKU_SIZE }, () => Array(MG_GOMOKU_SIZE).fill(0));
     mgGomokuOver = false;
     mgGomokuLocked = false;
+    mgGomokuTurn = 1;
     mgGomokuRender();
 }
 
 function mgGomokuRender(lastR = -1, lastC = -1) {
     const wrap = document.getElementById('mg-view-gomoku');
     const cellSize = 26;
+    const modeBtn = (mode, label) => `<button onclick="mgGomokuSetMode('${mode}')" style="padding:6px 12px; border-radius:10px;
+        border:1px solid var(--border-color); background:${mgGomokuMode===mode?'var(--accent-color)':'var(--primary-bg)'};
+        color:${mgGomokuMode===mode?'#fff':'var(--text-secondary)'}; cursor:pointer; font-size:12px;">${label}</button>`;
+    const turnText = mgGomokuMode === 'pvp'
+        ? (mgGomokuTurn === 1
+            ? '轮到 <b style="color:#1a1a1a;">● 你（黑方）</b>'
+            : '轮到 <b style="color:var(--text-secondary);">○ 对方（白方）</b>')
+        : '你执 <b style="color:#1a1a1a;">●</b>，AI 执 <b style="color:var(--text-secondary);">○</b>，点击空格落子';
     wrap.innerHTML = mgHeader('⚫ 五子棋',
-        `<button onclick="mgGomokuInit()" style="padding:6px 12px; border-radius:10px; border:1px solid var(--border-color);
-            background:var(--primary-bg); color:var(--text-secondary); cursor:pointer; font-size:12px;">重新开始</button>`) + `
+        `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+            <button onclick="mgGomokuInit()" style="padding:6px 12px; border-radius:10px; border:1px solid var(--border-color);
+                background:var(--primary-bg); color:var(--text-secondary); cursor:pointer; font-size:12px;">重新开始</button>
+            ${modeBtn('pvp','双人对战')}
+            ${modeBtn('ai','人机对战')}
+        </div>`) + `
         <div style="display:flex; justify-content:center;">
             <div style="display:grid; grid-template-columns:repeat(${MG_GOMOKU_SIZE}, ${cellSize}px); gap:0;
                 background:var(--secondary-bg); border:2px solid var(--border-color); border-radius:8px; padding:4px;">
@@ -331,34 +346,47 @@ function mgGomokuRender(lastR = -1, lastC = -1) {
             </div>
         </div>
         <div id="mg-gomoku-status" style="text-align:center; margin-top:12px; font-size:13px; color:var(--text-secondary);">
-            你执 <b style="color:#1a1a1a;">●</b>，AI 执 <b style="color:var(--text-secondary);">○</b>，点击空格落子
+            ${turnText}
         </div>`;
 }
+
+window.mgGomokuSetMode = function(mode) {
+    if (!['ai','pvp'].includes(mode)) return;
+    mgGomokuMode = mode;
+    mgGomokuInit();
+};
 
 window.mgGomokuPlace = function (r, c) {
     if (mgGomokuOver || mgGomokuLocked) return;
     if (mgGomokuBoard[r][c] !== 0) return;
-    mgGomokuLocked = true;
-    mgGomokuBoard[r][c] = 1;
+    mgGomokuBoard[r][c] = mgGomokuTurn;
     mgGomokuRender(r, c);
-    if (mgGomokuCheckWin(r, c, 1)) {
-        mgGomokuEnd('player');
+    if (mgGomokuCheckWin(r, c, mgGomokuTurn)) {
+        mgGomokuEnd(mgGomokuTurn === 1 ? 'player' : (mgGomokuMode === 'pvp' ? 'partner' : 'ai'));
         return;
     }
     if (mgGomokuBoardFull()) { mgGomokuEnd('draw'); return; }
-    // AI 思考
-    const status = document.getElementById('mg-gomoku-status');
-    if (status) status.textContent = 'AI 思考中…';
-    setTimeout(() => {
-        const [ar, ac] = mgGomokuAI();
-        mgGomokuBoard[ar][ac] = 2;
-        mgGomokuRender(ar, ac);
-        if (mgGomokuCheckWin(ar, ac, 2)) { mgGomokuEnd('ai'); return; }
-        if (mgGomokuBoardFull()) { mgGomokuEnd('draw'); return; }
-        mgGomokuLocked = false;
-        const s = document.getElementById('mg-gomoku-status');
-        if (s) s.innerHTML = '你执 <b style="color:#1a1a1a;">●</b>，AI 执 <b style="color:var(--text-secondary);">○</b>，点击空格落子';
-    }, 350);
+
+    if (mgGomokuMode === 'pvp') {
+        // 双人模式：交换回合
+        mgGomokuTurn = mgGomokuTurn === 1 ? 2 : 1;
+        mgGomokuRender(r, c);
+    } else {
+        // AI 模式：对方 AI 下
+        mgGomokuLocked = true;
+        const status = document.getElementById('mg-gomoku-status');
+        if (status) status.textContent = 'AI 思考中…';
+        setTimeout(() => {
+            const [ar, ac] = mgGomokuAI();
+            mgGomokuBoard[ar][ac] = 2;
+            mgGomokuRender(ar, ac);
+            if (mgGomokuCheckWin(ar, ac, 2)) { mgGomokuEnd('ai'); return; }
+            if (mgGomokuBoardFull()) { mgGomokuEnd('draw'); return; }
+            mgGomokuLocked = false;
+            const s = document.getElementById('mg-gomoku-status');
+            if (s) s.innerHTML = '你执 <b style="color:#1a1a1a;">●</b>，AI 执 <b style="color:var(--text-secondary);">○</b>，点击空格落子';
+        }, 350);
+    }
 };
 
 function mgGomokuBoardFull() {
@@ -452,6 +480,9 @@ function mgGomokuEnd(winner) {
         mgData.gomokuWins++;
         if (status) status.innerHTML = `<b style="color:var(--accent-color);">你赢了！🎉 五子连珠</b>`;
         if (typeof playSound === 'function') playSound('message');
+    } else if (winner === 'partner') {
+        mgData.gomokuLosses++;
+        if (status) status.innerHTML = `<b style="color:#E67E22;">对方获胜！再来一局吧</b>`;
     } else if (winner === 'ai') {
         mgData.gomokuLosses++;
         if (status) status.innerHTML = `<b style="color:var(--text-secondary);">AI 获胜，再来一局吧</b>`;
