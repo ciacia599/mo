@@ -253,6 +253,12 @@ function exRenderHub() {
         { key:'checkin', icon:'fa-bell', name:'查岗', desc:'定时监测对方', color:'#E17055' },
         { key:'fav', icon:'fa-star', name:'对方收藏', desc:'Ta 的珍藏对话', color:'#FDCB6E' },
         { key:'journal', icon:'fa-feather', name:'觉察日志', desc:'反思与成长', color:'#00CEC9' },
+        { key:'rhythm', icon:'fa-sliders-h', name:'节奏设置', desc:'双方回复节奏可调', color:'#6c5ce7' },
+        { key:'mailbox', icon:'fa-envelope', name:'写信/提问', desc:'主动写信提问', color:'#e17055' },
+        { key:'invite', icon:'fa-handshake', name:'陪伴邀请', desc:'邀你工作学习运动', color:'#00b894' },
+        { key:'calllog', icon:'fa-phone-alt', name:'通话记录', desc:'次数/时长/可导出', color:'#2ecc71' },
+        { key:'sessions', icon:'fa-comments', name:'私聊会话', desc:'独立会话+头像', color:'#0984e3' },
+        { key:'moments', icon:'fa-users', name:'朋友圈', desc:'发图/换背景/留言', color:'#fd79a8' },
     ];
     grid.innerHTML = items.map(it => `
         <div class="ex-hub-card" onclick="exOpen('${it.key}')" style="--card-color:${it.color};">
@@ -303,6 +309,23 @@ window.exOpen = function(key) {
         checkin: exViewCheckin,
         fav: exViewPartnerFavs,
         journal: exViewJournal,
+        rhythm: () => {
+            exSetBody(exHeader('⏱️ 节奏设置', '我和对方独立调节 / 查岗 / 导出') +
+                exHtmlRhythmPanel() +
+                exHtmlPartnerCheckinPanel() +
+                exHtmlExportPanel());
+        },
+        mailbox: exViewMailbox,
+        invite: exViewInvitations,
+        calllog: exViewCallRecords,
+        sessions: exViewSessions,
+        moments: () => {
+            exSetBody(exHeader('🌈 朋友圈', '发图、留言、换封面') + `
+                <div style="background:var(--secondary-bg);border:1px solid var(--border-color);border-radius:12px;padding:14px;margin-bottom:14px;">
+                    <div style="font-size:13px;color:var(--text-secondary);margin-bottom:10px;">独立的朋友圈界面，双方可发文字/图片、互相点赞留言、修改背景与签名。</div>
+                    <button class="ex-primary-btn" style="width:100%;padding:10px 12px;font-size:13px;border-radius:10px;" onclick="window.openMoments()">📸 打开朋友圈</button>
+                </div>`);
+        },
     };
     if (map[key]) map[key]();
 };
