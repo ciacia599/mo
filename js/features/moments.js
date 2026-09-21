@@ -132,11 +132,11 @@ function momRender() {
     if (!momModal) return;
     const bgStyle = momData.background
         ? `background-image:url('${momData.background}');background-size:cover;background-position:center;`
-        : 'background:linear-gradient(135deg,#c5a47e,#e8d0a6,#f4a261);';
+        : 'background:linear-gradient(135deg, rgba(190,159,136,0.82), rgba(243,215,186,0.8), rgba(255,255,255,0.45));';
     const sig = momData.signature || '什么都没留下…';
     momModal.innerHTML = `
         <div class="modal-content" style="max-width:560px;margin:30px auto;border-radius:18px;overflow:hidden;position:relative;max-height:92vh;display:flex;flex-direction:column;">
-            <div id="mom-header" style="position:relative;height:200px;${bgStyle};cursor:pointer;" onclick="document.getElementById('mom-bg-file').click()">
+            <div id="mom-header" style="position:relative;height:200px;${bgStyle};cursor:pointer;box-shadow:inset 0 -40px 60px rgba(31,22,18,0.16);" onclick="document.getElementById('mom-bg-file').click()">
                 <div style="position:absolute;inset:0;background:linear-gradient(to bottom,transparent 40%,rgba(0,0,0,0.35));"></div>
                 <button onclick="momClose();event.stopPropagation();" style="position:absolute;top:10px;right:10px;width:34px;height:34px;border-radius:50%;background:rgba(0,0,0,0.4);color:#fff;border:none;font-size:18px;cursor:pointer;z-index:5;">×</button>
                 <div style="position:absolute;right:14px;bottom:14px;display:flex;align-items:flex-end;gap:10px;z-index:3;">
@@ -151,12 +151,12 @@ function momRender() {
                 </div>
                 <input type="file" id="mom-bg-file" accept="image/*" style="display:none" onchange="momBgUpload(this)">
             </div>
-            <div style="flex:1;overflow:auto;background:var(--primary-bg);">
+            <div style="flex:1;overflow:auto;background:linear-gradient(180deg, rgba(255,255,255,0.65), rgba(250,245,240,0.96));">
                 <!-- 工具栏 -->
-                <div style="position:sticky;top:0;background:var(--primary-bg);z-index:2;padding:10px 14px;border-bottom:1px solid var(--border-color);display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-                    <button onclick="momNewPost()" style="flex:1;padding:8px 12px;border-radius:10px;border:1px dashed var(--accent-color);background:rgba(var(--accent-color-rgb,197,164,126),0.08);color:var(--accent-color);cursor:pointer;font-size:12px;font-weight:600;">✨ 发动态</button>
-                    <button onclick="momShowProfile()" style="padding:8px 12px;border-radius:10px;border:1px solid var(--border-color);background:var(--secondary-bg);color:var(--text-secondary);cursor:pointer;font-size:11px;">🛠 资料设置</button>
-                    <button onclick="momPartnerPostExample()" style="padding:8px 12px;border-radius:10px;border:1px solid var(--border-color);background:var(--secondary-bg);color:var(--text-secondary);cursor:pointer;font-size:11px;" title="模拟对方发一条">🤖 模拟对方</button>
+                <div style="position:sticky;top:0;background:rgba(255,255,255,0.72);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);z-index:2;padding:10px 14px;border-bottom:1px solid rgba(var(--accent-color-rgb,197,164,126),0.12);display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+                    <button onclick="momNewPost()" style="flex:1;padding:8px 12px;border-radius:10px;border:1px dashed rgba(var(--accent-color-rgb,197,164,126),0.45);background:rgba(var(--accent-color-rgb,197,164,126),0.08);color:var(--accent-color);cursor:pointer;font-size:12px;font-weight:600;">✨ 发动态</button>
+                    <button onclick="momShowProfile()" style="padding:8px 12px;border-radius:10px;border:1px solid rgba(var(--accent-color-rgb,197,164,126),0.12);background:rgba(255,255,255,0.52);color:var(--text-secondary);cursor:pointer;font-size:11px;">🛠 资料设置</button>
+                    <button onclick="momPartnerPostExample()" style="padding:8px 12px;border-radius:10px;border:1px solid rgba(var(--accent-color-rgb,197,164,126),0.12);background:rgba(255,255,255,0.52);color:var(--text-secondary);cursor:pointer;font-size:11px;" title="模拟对方发一条">🤖 模拟对方</button>
                 </div>
                 <div id="mom-feed" style="padding:12px 14px 30px;"></div>
             </div>
@@ -382,6 +382,20 @@ window.momPartnerPostExample = function() {
     momRender();
     if (typeof showNotification === 'function') showNotification(`${momPartnerName()} 发了一条朋友圈 💫`, 'success', 3000);
 };
+
+/* ============ 对方概率主动发朋友圈（每天至多一条） ============ */
+async function momPartnerAutoPost() {
+    try {
+        await momLoad();
+        const today = new Date().toDateString();
+        if (momData.partnerLastPostDay === today) return;   // 今天已发过
+        if (Math.random() > 0.4) return;                    // 40% 概率今天发
+        momData.partnerLastPostDay = today;
+        momPartnerPostExample();
+    } catch(e) {}
+}
+setInterval(momPartnerAutoPost, (typeof getSiteFrequency === 'function' ? getSiteFrequency('momentsAutoMin', 60) : 60) * 60000);
+setTimeout(momPartnerAutoPost, (typeof getSiteFrequency === 'function' ? getSiteFrequency('momentsAutoMin', 60) : 60) * 60000);
 
 /* ============ 渲染动态列表 ============ */
 function momRenderFeed() {

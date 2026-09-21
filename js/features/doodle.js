@@ -22,6 +22,30 @@ function ddPartnerName() {
     return '梦角';
 }
 
+/* 互动小屋功能按钮 */
+function ddFeatureBtn(icon, label, onclick) {
+    return `<button type="button" onclick="ddLaunchFeature(function(){${onclick}})"
+        style="display:flex; flex-direction:column; align-items:center; gap:3px; padding:8px 2px; border-radius:12px;
+        border:1px solid var(--border-color); background:var(--primary-bg); cursor:pointer;">
+        <span style="font-size:18px; line-height:1;">${icon}</span>
+        <span style="font-size:10px; color:var(--text-secondary);">${label}</span>
+    </button>`;
+}
+
+window.ddLaunchFeature = function (openFeature) {
+    const modal = document.getElementById('doodle-modal');
+    if (modal && typeof hideModal === 'function') hideModal(modal);
+    else if (modal) modal.style.display = 'none';
+    window.setTimeout(() => {
+        try {
+            if (typeof openFeature === 'function') openFeature();
+        } catch (error) {
+            console.error('互动小屋功能打开失败', error);
+            if (typeof showNotification === 'function') showNotification('功能打开失败，请重试', 'error');
+        }
+    }, 260);
+};
+
 /* ============ 主入口 ============ */
 window.openDoodle = function() {
     ddEnsureModal();
@@ -62,6 +86,53 @@ function ddEnsureModal() {
                 <button class="ex-primary-btn" style="flex:1;" onclick="ddSendToPartner()">📨 发给 ${ddPartnerName()}</button>
             </div>
             <div style="font-size:11px; color:var(--text-secondary); text-align:center; margin-top:8px;">发送后画作会出现在聊天中，对方可能回你一幅 🎨</div>
+            <div style="margin-top:12px; background:var(--secondary-bg); border-radius:10px; padding:10px;">
+                <div style="font-size:11px; color:var(--text-secondary); margin-bottom:6px;">🎨 对方画画频率</div>
+                <div style="display:flex; gap:4px;">
+                    ${['off','low','medium','high','custom'].map(f => {
+                        const labels = {off:'关闭',low:'悠闲',medium:'普通',high:'热情',custom:'自定义'};
+                        const cur = (typeof exData !== 'undefined' && exData.ddDrawFreq) || 'low';
+                        return `<button onclick="ddSetDrawFreq('${f}')" style="flex:1;padding:5px;font-size:11px;border-radius:6px;border:1px solid ${cur===f?'var(--accent-color)':'var(--border-color)'};background:${cur===f?'var(--accent-color)':'var(--primary-bg)'};color:${cur===f?'#fff':'var(--text-primary)'};cursor:pointer;">${labels[f]}</button>`;
+                    }).join('')}
+                </div>
+                <div id="dd-freq-custom-row" style="display:${((typeof exData !== 'undefined' && exData.ddDrawFreq) || 'low') === 'custom' ? 'flex' : 'none'}; gap:6px; align-items:center; margin-top:8px;">
+                    <input id="dd-freq-min" type="number" min="1" max="720" placeholder="最短" value="${(exData && exData.ddDrawFreqCustom && exData.ddDrawFreqCustom[0]) || ''}" style="width:60px;padding:5px 8px;border:1px solid var(--border-color);border-radius:6px;background:var(--primary-bg);color:var(--text-primary);font-size:12px;">
+                    <span style="font-size:11px;color:var(--text-secondary);">~</span>
+                    <input id="dd-freq-max" type="number" min="1" max="720" placeholder="最长" value="${(exData && exData.ddDrawFreqCustom && exData.ddDrawFreqCustom[1]) || ''}" style="width:60px;padding:5px 8px;border:1px solid var(--border-color);border-radius:6px;background:var(--primary-bg);color:var(--text-primary);font-size:12px;">
+                    <span style="font-size:11px;color:var(--text-secondary);">分钟</span>
+                    <button class="ex-quick-btn" style="padding:5px 12px;font-size:11px;" onclick="ddApplyCustomFreq()">应用</button>
+                </div>
+            </div>
+            <div style="margin-top:14px; border-top:1px dashed var(--border-color); padding-top:10px;">
+                <div style="font-size:11px; color:var(--text-secondary); margin-bottom:8px;">💗 互动小屋 · 和 Ta 的更多玩法</div>
+                <div style="display:grid; grid-template-columns:repeat(5,1fr); gap:6px;">
+                    ${ddFeatureBtn('🧧','红包','pgOpenRedpacket()')}
+                    ${ddFeatureBtn('🔒','小黑屋','pgOpenJail()')}
+                    ${ddFeatureBtn('⚖️','惩罚','pgOpenPunish()')}
+                    ${ddFeatureBtn('🐾','宠物','pgOpenPet()')}
+                    ${ddFeatureBtn('🧍','小人','openCompanion()')}
+                    ${ddFeatureBtn('🌱','花园','pgOpenGarden()')}
+                    ${ddFeatureBtn('📖','档案','pgOpenProfile()')}
+                    ${ddFeatureBtn('📍','寻踪','pgOpenTrack()')}
+                    ${ddFeatureBtn('☯️','易经','pgOpenIching()')}
+                    ${ddFeatureBtn('🎮','游戏','openMiniGamesCenter()')}
+                    ${ddFeatureBtn('⚙️','设置','pgOpenSettings()')}
+                    ${ddFeatureBtn('👤','头像','idOpen()')}
+                    ${ddFeatureBtn('✏️','昵称','idOpenNickname()')}
+                    ${ddFeatureBtn('❓','问答','s2OpenQa()')}
+                    ${ddFeatureBtn('📋','问卷','s2OpenSurvey()')}
+                    ${ddFeatureBtn('🗒','留言','exOpenBoard()')}
+                    ${ddFeatureBtn('🛍','商城','s2OpenShop()')}
+                    ${ddFeatureBtn('🏠','我们的家','s2OpenHome()')}
+                    ${ddFeatureBtn('📞','通话记录','s2OpenCalls()')}
+                    ${ddFeatureBtn('↩️','撤回','s2OpenRecall()')}
+                    ${ddFeatureBtn('⭐','Ta收藏','s2OpenFavs()')}
+                    ${ddFeatureBtn('🤝','陪伴邀请','s2OpenInvite()')}
+                    ${ddFeatureBtn('😊','心情','s2ShowMood()')}
+                    ${ddFeatureBtn('📮','信箱','exViewMailbox && exViewMailbox()')}
+                    ${ddFeatureBtn('💡','灵感','pgOpenNotes()')}
+                </div>
+            </div>
         </div>`;
     document.body.appendChild(modal);
     modal.addEventListener('click', e => { if (e.target === modal) hideModal(modal); });
@@ -251,10 +322,31 @@ window.ddSendToPartner = function() {
 
 /* 对方主动/随机画画：时间/数量/内容随意画（不绑定我的操作） */
 let ddPartnerDrawTimer = null;
+// 画画频率：off=关闭, low=5-15分, medium=3-8分, high=1-4分, custom=自定义分钟区间
+function ddDrawFreqRange() {
+    const f = (typeof exData !== 'undefined' && exData.ddDrawFreq) ? exData.ddDrawFreq : 'low';
+    if (f === 'off') return null;
+    if (f === 'high') return [60000, 240000];
+    if (f === 'medium') return [180000, 480000];
+    if (f === 'custom') {
+        const c = (exData.ddDrawFreqCustom && exData.ddDrawFreqCustom.length === 2) ? exData.ddDrawFreqCustom : [10, 30];
+        let min = Math.max(1, parseInt(c[0], 10) || 10);
+        let max = Math.max(min, parseInt(c[1], 10) || min);
+        return [min * 60000, max * 60000];
+    }
+    if (typeof getSiteFrequencyRange === 'function') {
+        const range = getSiteFrequencyRange('doodleMin', 'doodleMax', 5, 15);
+        return [range[0] * 60000, range[1] * 60000];
+    }
+    return [300000, 900000]; // low: 5-15 分钟
+}
 function ddPartnerStartIdleDraws() {
     if (ddPartnerDrawTimer) return;
+    const range = ddDrawFreqRange();
+    if (!range) return; // 关闭
+    const [min, max] = range;
     const loop = () => {
-        const next = 60000 + Math.random() * 180000; // 1~4 分钟随机画一张（时间随意）
+        const next = min + Math.random() * (max - min);
         if (window.__PerfManager) {
             ddPartnerDrawTimer = window.__PerfManager.registerTimer(() => {
                 if (window.__PerfManager.isPaused) return;
@@ -273,6 +365,36 @@ function ddPartnerStartIdleDraws() {
     };
     loop();
 }
+window.ddSetDrawFreq = function(f) {
+    if (typeof exData !== 'undefined') { exData.ddDrawFreq = f; if (typeof exSave === 'function') exSave(); }
+    if (ddPartnerDrawTimer) {
+        if (window.__PerfManager) window.__PerfManager.unregisterTimer(ddPartnerDrawTimer);
+        else clearTimeout(ddPartnerDrawTimer);
+        ddPartnerDrawTimer = null;
+    }
+    if (f !== 'off') ddPartnerStartIdleDraws();
+    const row = document.getElementById('dd-freq-custom-row');
+    if (row) row.style.display = f === 'custom' ? 'flex' : 'none';
+    showNotification('画画频率：' + ({off:'关闭',low:'悠闲 5-15分',medium:'普通 3-8分',high:'热情 1-4分',custom:'自定义区间'}[f] || f), 'info', 2500);
+};
+window.ddApplyCustomFreq = function() {
+    const a = parseInt((document.getElementById('dd-freq-min') || {}).value, 10);
+    const b = parseInt((document.getElementById('dd-freq-max') || {}).value, 10);
+    if (!a || a < 1) { showNotification('请输入有效的最短分钟数', 'warning'); return; }
+    const min = a, max = Math.max(a, b || a);
+    if (typeof exData !== 'undefined') {
+        exData.ddDrawFreqCustom = [min, max];
+        exData.ddDrawFreq = 'custom';
+        if (typeof exSave === 'function') exSave();
+    }
+    if (ddPartnerDrawTimer) {
+        if (window.__PerfManager) window.__PerfManager.unregisterTimer(ddPartnerDrawTimer);
+        else clearTimeout(ddPartnerDrawTimer);
+        ddPartnerDrawTimer = null;
+    }
+    ddPartnerStartIdleDraws();
+    showNotification(`画画频率已自定义：每 ${min}~${max} 分钟一幅 🎨`, 'success', 3000);
+};
 window.ddPartnerSendRandomDoodle = function(isReply) {
     const replyURL = ddGeneratePartnerDoodle();
     if (typeof addMessage === 'function') {

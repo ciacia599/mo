@@ -72,6 +72,9 @@ const MG_GAMES = [
     { id: 'jump',    icon: '🦘',  name: '跳一跳',     desc: '蓄力跳跃挑战',      best: () => '最高 ' + mgData.jumpHigh + ' 分' }
 ];
 
+// 参考站共同的轻互动玩法优先展示；项目已有的独特玩法不删除、不改规则。
+const MG_SHARED_GAME_IDS = new Set(['rps', 'gomoku', 'ludo', 'memory', 'match3', 'link', 'g2048', 'mine', 'pong', 'fish']);
+
 // 构建中心模态框（若已存在则复用）
 function mgEnsureModal() {
     const existing = document.getElementById('mg-modal');
@@ -101,7 +104,7 @@ function mgEnsureModal() {
 function mgRenderCenter() {
     const wrap = document.getElementById('mg-view-center');
     if (!wrap) return;
-    const cards = MG_GAMES.map(g => `
+    const renderCards = (games) => games.map(g => `
         <div class="mg-card" onclick="mgShowGame('${g.id}')"
              style="background:var(--primary-bg); border:1.5px solid var(--border-color); border-radius:14px;
                     padding:16px 12px; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:6px;
@@ -113,23 +116,30 @@ function mgRenderCenter() {
             <div style="font-size:11px; color:var(--text-secondary); text-align:center;">${g.desc}</div>
             <div style="font-size:10px; color:var(--accent-color); margin-top:2px;">${g.best()}</div>
         </div>`).join('');
+    const sharedGames = MG_GAMES.filter(g => MG_SHARED_GAME_IDS.has(g.id));
+    const signatureGames = MG_GAMES.filter(g => !MG_SHARED_GAME_IDS.has(g.id));
     wrap.innerHTML = `
         <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;">
             <div style="font-size:17px; font-weight:800; color:var(--text-primary);">🎮 游戏中心</div>
             <button onclick="mgCloseCenter()" style="width:30px; height:30px; border-radius:50%; border:1px solid var(--border-color);
                     background:var(--primary-bg); color:var(--text-secondary); cursor:pointer; font-size:16px; line-height:1;">×</button>
         </div>
-        <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:12px;">${cards}</div>
+        <div style="padding:10px 12px; margin-bottom:14px; border-radius:14px; background:linear-gradient(135deg,rgba(var(--accent-color-rgb),0.12),rgba(var(--accent-color-rgb),0.03)); border:1px solid rgba(var(--accent-color-rgb),0.12);">
+            <div style="font-size:12px; font-weight:700; color:var(--text-primary);">一起玩 · 共同互动</div>
+            <div style="font-size:10px; color:var(--text-secondary); margin-top:3px; line-height:1.5;">参考常见双人小游戏的轻量体验，先从对战、配对和竞速开始。</div>
+        </div>
+        <div class="mg-section-label">双人互动优先</div>
+        <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:12px;">${renderCards(sharedGames)}</div>
+        ${signatureGames.length ? `<div class="mg-section-label" style="margin-top:18px;">你的特色玩法</div><div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:12px;">${renderCards(signatureGames)}</div>` : ''}
         <div style="font-size:11px; color:var(--text-secondary); text-align:center; margin-top:14px; opacity:0.7;">
             数据自动保存在本地，切换主题即换肤 ✦
         </div>`;
 }
 
-// 切换视图
+// 切换视图（动态识别所有 mg-view-* 容器，便于扩展包新增游戏）
 function mgSwitchView(viewId) {
-    ['center', 'rps', 'gomoku', 'ludo', 'memory', 'mono', 'jump'].forEach(v => {
-        const el = document.getElementById('mg-view-' + v);
-        if (el) el.style.display = (v === viewId) ? 'block' : 'none';
+    document.querySelectorAll('[id^="mg-view-"]').forEach(el => {
+        el.style.display = (el.id === 'mg-view-' + viewId) ? 'block' : 'none';
     });
     mgCurrentView = viewId;
 }
@@ -171,6 +181,13 @@ window.mgShowGame = function (id) {
         case 'memory':  mgSwitchView('memory'); mgMemoryInit();   break;
         case 'mono':    mgSwitchView('mono');   mgMonoInit();     break;
         case 'jump':    mgSwitchView('jump');   mgJumpInit();     break;
+        default:
+            // 扩展包游戏（games-plus.js 等通过 __mgExtraOpen 注册）
+            if (window.__mgExtraOpen && typeof window.__mgExtraOpen[id] === 'function') {
+                window.__mgExtraOpen[id]();
+                mgSwitchView(id);
+            }
+            break;
     }
 };
 

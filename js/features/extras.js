@@ -259,6 +259,9 @@ function exRenderHub() {
         { key:'calllog', icon:'fa-phone-alt', name:'通话记录', desc:'次数/时长/可导出', color:'#2ecc71' },
         { key:'sessions', icon:'fa-comments', name:'私聊会话', desc:'独立会话+头像', color:'#0984e3' },
         { key:'moments', icon:'fa-users', name:'朋友圈', desc:'发图/换背景/留言', color:'#fd79a8' },
+        { key:'transfer', icon:'fa-compass', name:'转移系统', desc:'显化 / 转移 / 世界设定', color:'#7E8CE0' },
+        { key:'oc', icon:'fa-user-astronaut', name:'OC设计', desc:'人物 / 世界 / 关系', color:'#9B7EDE' },
+        { key:'companion', icon:'fa-child', name:'陪伴小人', desc:'动作 / 衣橱 / 成长', color:'#E89AAB' },
     ];
     grid.innerHTML = items.map(it => `
         <div class="ex-hub-card" onclick="exOpen('${it.key}')" style="--card-color:${it.color};">
@@ -269,20 +272,43 @@ function exRenderHub() {
     `).join('');
 }
 
+/* 自定义输入弹窗（替代可能被 WebView 禁用的原生 prompt） */
+function exPrompt(title, def, cb) {
+    const overlay = document.createElement('div');
+    overlay.id = 'ex-prompt-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px;';
+    overlay.innerHTML = `<div style="background:var(--primary-bg,#fff);border-radius:16px;padding:18px;width:100%;max-width:320px;">
+        <div style="font-size:15px;font-weight:700;color:var(--text-primary,#333);margin-bottom:12px;">${title}</div>
+        <input id="ex-prompt-input" type="text" inputmode="numeric" value="${(def === undefined || def === null) ? '' : def}" style="width:100%;box-sizing:border-box;padding:10px;border:1px solid var(--border-color,#ccc);border-radius:8px;font-size:14px;background:var(--secondary-bg,#f5f5f5);color:var(--text-primary,#333);">
+        <div style="display:flex;gap:8px;margin-top:12px;">
+            <button id="ex-prompt-cancel" style="flex:1;padding:10px;border:1px solid var(--border-color,#ccc);border-radius:8px;background:var(--primary-bg,#fff);color:var(--text-primary,#333);cursor:pointer;font-size:13px;">取消</button>
+            <button id="ex-prompt-ok" style="flex:1;padding:10px;border:none;border-radius:8px;background:var(--accent-color,#ff6b9d);color:#fff;cursor:pointer;font-size:13px;font-weight:600;">确定</button>
+        </div></div>`;
+    document.body.appendChild(overlay);
+    const input = overlay.querySelector('#ex-prompt-input');
+    input.focus();
+    input.select();
+    const close = (val) => { overlay.remove(); cb(val); };
+    overlay.querySelector('#ex-prompt-cancel').onclick = () => close(null);
+    overlay.querySelector('#ex-prompt-ok').onclick = () => close(input.value);
+    input.onkeydown = (e) => { if (e.key === 'Enter') close(input.value); if (e.key === 'Escape') close(null); };
+}
+
 /* 金币随意修改（点击百宝箱顶部金币标签即可改） */
 window.exEditCoins = function(who) {
     const isMe = who === 'me';
     const cur = isMe ? exData.coins : exData.partnerCoins;
     const name = isMe ? '我' : exPartnerName();
-    const v = prompt('设置 ' + name + ' 的金币数量（可任意数值）', cur);
-    if (v === null) return;
-    const n = parseInt(v, 10);
-    if (isNaN(n) || n < 0) { showNotification('请输入非负整数', 'warning'); return; }
-    if (isMe) exData.coins = n; else exData.partnerCoins = n;
-    exSave();
-    exRenderHub();
-    showNotification(name + ' 的金币已设为 ' + n, 'success');
-    if (typeof playSound === 'function') playSound('favorite');
+    exPrompt('设置 ' + name + ' 的金币数量（可任意数值）', cur, function(v) {
+        if (v === null) return;
+        const n = parseInt(v, 10);
+        if (isNaN(n) || n < 0) { showNotification('请输入非负整数', 'warning'); return; }
+        if (isMe) exData.coins = n; else exData.partnerCoins = n;
+        exSave();
+        exRenderHub();
+        showNotification(name + ' 的金币已设为 ' + n, 'success');
+        if (typeof playSound === 'function') playSound('favorite');
+    });
 };
 
 /* 路由到各功能视图 */
@@ -326,6 +352,9 @@ window.exOpen = function(key) {
                     <button class="ex-primary-btn" style="width:100%;padding:10px 12px;font-size:13px;border-radius:10px;" onclick="window.openMoments()">📸 打开朋友圈</button>
                 </div>`);
         },
+            transfer: () => { hideModal(document.getElementById('extras-modal')); setTimeout(() => { if (typeof openTransferSystem === 'function') openTransferSystem(); }, 260); },
+            oc: () => { hideModal(document.getElementById('extras-modal')); setTimeout(() => { if (typeof openOCDesigner === 'function') openOCDesigner(); }, 260); },
+            companion: () => { hideModal(document.getElementById('extras-modal')); setTimeout(() => { if (typeof openCompanion === 'function') openCompanion(); }, 260); },
     };
     if (map[key]) map[key]();
 };
@@ -523,27 +552,32 @@ window.exRedpacketCardHtml = function(rpId) {
     const rp = exData.redpackets.find(r => r.id === rpId);
     if (!rp) return '';
     const isMine = rp.from === 'me';
+    const amtShow = rp.total || rp.amount;
+    const typeTag = rp.type === 'password' ? '<span style="font-size:10px;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:8px;margin-left:4px;">🔑 口令</span>'
+        : rp.type === 'lucky' ? '<span style="font-size:10px;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:8px;margin-left:4px;">🎲 拼手气</span>' : '';
     let body, tagText;
     if (rp.opened) {
-        body = `<div style="font-size:11px;opacity:0.75;margin-top:4px;">${exCoin(rp.amount)} · 已领取</div>`;
+        body = `<div style="font-size:11px;opacity:0.75;margin-top:4px;">${exCoin(amtShow)} · 已领取</div>`;
         tagText = '已领取';
     } else if (rp.expired) {
-        body = `<div style="font-size:11px;opacity:0.75;margin-top:4px;">${exCoin(rp.amount)} · 已退回</div>`;
+        body = `<div style="font-size:11px;opacity:0.75;margin-top:4px;">${exCoin(amtShow)} · 已退回</div>`;
         tagText = '已退回';
     } else {
-        body = `<div style="font-size:11px;opacity:0.9;margin-top:4px;">${exEscape(rp.message)}</div>
-                <div style="font-size:10px;opacity:0.75;margin-top:2px;">${exRpRemainText(rp)}</div>`;
+        body = `<div style="font-size:12px;opacity:0.95;margin-top:4px;">${exEscape(rp.message)}</div>
+                <div style="font-size:10px;opacity:0.75;margin-top:2px;">${rp.type === 'password' ? '🔑 猜对口令才能领取 · ' : ''}${exRpRemainText(rp)}</div>`;
         tagText = '待领取';
     }
     const clickable = (!rp.opened && !rp.expired) ? `onclick="exOpenRedpacket('${rp.id}')"` : '';
-    return `<div ${clickable} style="background:linear-gradient(135deg,#E54D4D,#FA5752);color:#fff;border-radius:12px;padding:12px 14px;width:220px;cursor:pointer;${(!rp.opened && !rp.expired)?'':'opacity:0.85;'}">
-        <div style="display:flex;align-items:center;gap:8px;">
-            <span style="font-size:22px;">🧧</span>
-            <div style="flex:1;">
-                <div style="font-size:13px;font-weight:600;">${isMine ? ('我发给' + exPartnerName()) : (exPartnerName() + '发来的')} 红包</div>
+    return `<div ${clickable} style="background:linear-gradient(135deg,#E54D4D,#FA5752);color:#fff;border-radius:12px;padding:12px 14px;width:220px;cursor:pointer;position:relative;overflow:hidden;${(!rp.opened && !rp.expired)?'':'opacity:0.85;'}">
+        <div style="position:absolute;top:-8px;right:-8px;width:44px;height:44px;border-radius:50%;background:rgba(255,215,120,0.28);"></div>
+        <div style="display:flex;align-items:center;gap:10px;position:relative;">
+            <div style="width:38px;height:38px;border-radius:8px;background:linear-gradient(135deg,#FFD580,#F5B041);display:flex;align-items:center;justify-content:center;font-size:20px;box-shadow:0 2px 6px rgba(0,0,0,0.2);">🧧</div>
+            <div style="flex:1;min-width:0;">
+                <div style="font-size:13px;font-weight:600;">${isMine ? ('我发给' + exEscape(exPartnerName())) : (exEscape(exPartnerName()) + '发来的')}红包${typeTag}</div>
                 ${body}
             </div>
         </div>
+        <div style="border-top:1px solid rgba(255,255,255,0.25);margin-top:9px;padding-top:5px;font-size:10px;opacity:0.8;position:relative;">🧧 恭喜发财 · ${tagText}</div>
     </div>`;
 };
 
@@ -1414,7 +1448,8 @@ function exRenderReadingList() {
                 <div style="font-size:11px; color:var(--text-secondary); margin:6px 0 4px;">${exEscape(exPartnerName())} · ${b.partnerPage}/${b.pages||'?'}页 · ${pPct}%</div>
                 <div class="ex-progress"><div class="ex-progress-fill" style="width:${pPct}%; background:#FF6B6B;"></div></div>
                 <div style="display:flex; gap:6px; margin-top:8px; align-items:center; flex-wrap:wrap;">
-                    ${b.content?`<button class="ex-primary-btn" style="padding:6px 10px; font-size:11px;" onclick="exReadBook('${b.id}')">📖 阅读</button>`:''}
+                    ${b.content?`<button class="ex-primary-btn" style="padding:6px 10px; font-size:11px;" onclick="exReadBook('${b.id}')">📖 单人阅读</button>`:''}
+                    ${b.content?`<button class="ex-quick-btn" style="padding:6px 10px; font-size:11px;border-color:#00B894;color:#00B894;" onclick="exReadTogether('${b.id}')">👫 一起读</button>`:''}
                     <button class="ex-quick-btn" onclick="exBookPage('${b.id}', -10)">-10</button>
                     <button class="ex-quick-btn" onclick="exBookPage('${b.id}', -1)">-1</button>
                     <input id="ex-bk-input-${b.id}" type="number" value="${b.myPage}" style="flex:1; min-width:60px; padding:6px 8px; border:1px solid var(--border-color); border-radius:8px; background:var(--secondary-bg); color:var(--text-primary); font-size:11px;">
@@ -1563,7 +1598,238 @@ window.exReaderSaveAndBack = function() {
     exViewReading();
 };
 
-/* ============ 8. 留言板 ============ */
+/* ============ 7c. 一起看书（分页·自动翻页开关·边读边聊） ============ */
+const RT_PAGE_SIZE = 800;
+let rtTimers = { auto: null, partner: null };
+let rt = null;
+
+window.exReadTogether = function(id) {
+    const b = exData.reading.books.find(x => x.id === id);
+    if (!b || !b.content) { showNotification('该书无正文，无法一起阅读', 'warning'); return; }
+    exData.reading.currentId = id;
+    // 恢复上次一起读的状态（同本书）
+    const saved = exData.reading.together;
+    rt = {
+        id,
+        page: (saved && saved.id === id) ? saved.page : (b.myPage || 0),
+        autoTurn: saved && saved.id === id ? !!saved.autoTurn : false,
+        autoSec: saved && saved.id === id ? saved.autoSec : 60,
+        chat: (saved && saved.id === id && Array.isArray(saved.chat)) ? saved.chat : []
+    };
+    rt.page = Math.max(0, Math.min(b.pages - 1, rt.page));
+    if (!rt.chat.length) {
+        rt.chat.push({ from: 'partner', text: '一起看书吧 📖 读到有意思的地方和我说说', time: exNow() });
+    }
+    rtRender();
+    rtStartTimers();
+};
+function rtBook() {
+    return exData.reading.books.find(x => x.id === rt.id);
+}
+function rtSave() {
+    exData.reading.together = { id: rt.id, page: rt.page, autoTurn: rt.autoTurn, autoSec: rt.autoSec, chat: rt.chat.slice(-100) };
+    const b = rtBook();
+    if (b) {
+        b.myPage = rt.page;
+        if (rt.page >= b.pages - 1) { b.myPage = b.pages; b.finished = true; }
+    }
+    exSave();
+}
+function rtRender() {
+    const b = rtBook();
+    const body = document.getElementById('extras-body');
+    if (!body) return;
+    const pageText = b.content.substr(rt.page * RT_PAGE_SIZE, RT_PAGE_SIZE);
+    const myPct = Math.round(((rt.page + 1) / b.pages) * 100);
+    const pPct = Math.round((b.partnerPage / b.pages) * 100);
+    body.innerHTML = exHeader('📖 ' + b.title, '一起看书 · 第 ' + (rt.page + 1) + '/' + b.pages + ' 页') + `
+        <div style="padding:12px 14px;">
+            <div style="font-size:11px;color:var(--text-secondary);margin-bottom:6px;">
+                我：${myPct}% &nbsp;·&nbsp; ${exEscape(exPartnerName())}：${pPct}%（第 ${b.partnerPage} 页）
+            </div>
+            <div class="ex-progress" style="margin-bottom:4px;"><div style="height:100%;width:${myPct}%;background:var(--accent-color);border-radius:4px;"></div></div>
+            <div class="ex-progress" style="margin-bottom:10px;"><div style="height:100%;width:${pPct}%;background:#FF6B6B;border-radius:4px;"></div></div>
+
+            <div id="rt-page" style="background:var(--primary-bg);border:1px solid var(--border-color);border-radius:12px;padding:14px 16px;font-size:14px;line-height:1.9;color:var(--text-primary);min-height:160px;max-height:230px;overflow-y:auto;white-space:pre-wrap;word-break:break-word;">${exEscape(pageText)}</div>
+
+            <div style="display:flex;gap:6px;margin-top:9px;">
+                <button class="ex-quick-btn" style="flex:1;padding:8px;font-size:12px;" onclick="rtTurnPage(-1)">◀ 上一页</button>
+                <button class="ex-quick-btn" style="flex:1;padding:8px;font-size:12px;" onclick="rtJumpInput()">跳到…</button>
+                <button class="ex-quick-btn" style="flex:1;padding:8px;font-size:12px;" onclick="rtTurnPage(1)">下一页 ▶</button>
+            </div>
+
+            <div style="background:var(--secondary-bg);border-radius:10px;padding:9px 11px;margin-top:10px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                    <span style="font-size:12px;font-weight:600;color:var(--text-primary);">📑 自动翻页</span>
+                    <button onclick="rtToggleAuto()" style="padding:4px 14px;font-size:11px;border-radius:14px;border:none;cursor:pointer;background:${rt.autoTurn ? '#00B894' : '#999'};color:#fff;font-weight:600;">${rt.autoTurn ? '翻页中 ✓' : '不翻页'}</button>
+                </div>
+                <div style="display:flex;gap:5px;">
+                    ${[[30,'30秒'],[60,'1分钟'],[180,'3分钟'],[300,'5分钟']].map(o =>
+                        `<button onclick="rtSetAutoSec(${o[0]})" style="flex:1;padding:5px;font-size:11px;border-radius:7px;border:1px solid ${rt.autoSec===o[0]?'var(--accent-color)':'var(--border-color)'};background:${rt.autoSec===o[0]?'rgba(var(--accent-color-rgb,197,164,126),0.15)':'var(--primary-bg)'};color:var(--text-primary);cursor:pointer;">${o[1]}</button>`).join('')}
+                </div>
+            </div>
+
+            <div style="display:flex;align-items:center;gap:6px;margin-top:12px;font-size:11px;color:var(--text-secondary);">
+                💬 边读边聊<span style="margin-left:auto;color:#00B894;">Ta 按自己的节奏在读</span>
+            </div>
+            <div id="rt-chat" style="background:var(--secondary-bg);border-radius:10px;padding:9px 11px;max-height:180px;overflow-y:auto;margin-top:6px;">
+                ${rt.chat.map(rtBubble).join('')}
+            </div>
+            <div style="display:flex;gap:6px;margin-top:7px;">
+                <input id="rt-msg-input" placeholder="读到什么想和Ta说…" onkeydown="if(event.key==='Enter')rtSend()" style="flex:1;padding:7px 10px;border:1px solid var(--border-color);border-radius:8px;background:var(--primary-bg);color:var(--text-primary);font-size:12px;">
+                <button onclick="rtSend()" class="ex-primary-btn" style="padding:7px 13px;font-size:12px;">发送</button>
+            </div>
+            <button onclick="rtExit()" class="ex-quick-btn" style="width:100%;margin-top:10px;color:#E17055;">📕 退出一起看书</button>
+        </div>`;
+    const pageEl = document.getElementById('rt-page');
+    if (pageEl) pageEl.scrollTop = 0;
+    const chatEl = document.getElementById('rt-chat');
+    if (chatEl) chatEl.scrollTop = chatEl.scrollHeight;
+}
+function rtBubble(c) {
+    if (c.sys) {
+        return `<div style="text-align:center;margin:6px 0;"><span style="font-size:10px;background:rgba(0,0,0,0.1);color:#666;padding:2px 8px;border-radius:9px;">${exEscape(c.text)}</span></div>`;
+    }
+    const mine = c.from === 'me';
+    const t = new Date(c.time).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+    return `<div style="display:flex;justify-content:${mine ? 'flex-end' : 'flex-start'};margin-bottom:6px;">
+        <div style="max-width:78%;padding:6px 10px;border-radius:11px;font-size:12px;line-height:1.5;background:${mine ? 'var(--accent-color)' : 'var(--primary-bg)'};color:${mine ? '#fff' : 'var(--text-primary)'};">${exEscape(c.text)}
+            <div style="font-size:9px;opacity:0.6;margin-top:2px;text-align:${mine ? 'right' : 'left'};">${t}</div>
+        </div></div>`;
+}
+window.rtTurnPage = function(delta) {
+    const b = rtBook();
+    const np = rt.page + delta;
+    if (np < 0 || np >= b.pages) {
+        if (np >= b.pages) { rt.page = b.pages - 1; rtSave(); rtRender(); showNotification('已经是最后一页啦，读完了！🎉', 'success'); }
+        return;
+    }
+    rt.page = np;
+    rtSave();
+    rtRender();
+};
+window.rtJumpInput = function() {
+    const b = rtBook();
+    exPrompt('跳到第几页（1-' + b.pages + '）', rt.page + 1, function(v) {
+        if (v === null) return;
+        const n = parseInt(v, 10);
+        if (!isNaN(n) && n >= 1 && n <= b.pages) { rt.page = n - 1; rtSave(); rtRender(); }
+        else showNotification('页码无效', 'warning');
+    });
+};
+window.rtToggleAuto = function() {
+    rt.autoTurn = !rt.autoTurn;
+    rtSave();
+    rtRender();
+    if (rt.autoTurn) showNotification('自动翻页已开启，每 ' + rt.autoSec + ' 秒翻一页', 'success');
+    else showNotification('自动翻页已关闭，自己控制节奏', 'info');
+};
+window.rtSetAutoSec = function(sec) {
+    rt.autoSec = sec;
+    rt.autoTurn = true;
+    rtSave();
+    rtRender();
+};
+window.rtSend = function() {
+    const input = document.getElementById('rt-msg-input');
+    const text = input ? input.value.trim() : '';
+    if (!text) return;
+    const m = { from: 'me', text, time: exNow() };
+    rt.chat.push(m);
+    rtSave();
+    input.value = '';
+    document.getElementById('rt-chat').insertAdjacentHTML('beforeend', rtBubble(m));
+    const chatEl = document.getElementById('rt-chat');
+    chatEl.scrollTop = chatEl.scrollHeight;
+    if (Math.random() < 0.75) setTimeout(rtPartnerSay, 1500 + Math.random() * 3000);
+};
+const RT_PARTNER_WORDS = [
+    '这段写得真好，我划线了 ✏️', '主角好可爱，像你一样', '看到这里忍不住笑了 😆',
+    '等等，你看到第几页了？', '这一页的风景描写好美', '我在这一页给你留了个记号 ✏️', '读到这里有点想哭…',
+    '你先别翻，我还没看完这一页！', '哈哈这本书选得不错吧', '悄悄说：我读到你前面去了 🤫',
+    '这句情话学下来，以后说给你听 ❤️', '嗯…陪你看书的下午真幸福'
+];
+function rtPartnerSay() {
+    if (!rt) return;
+    const word = RT_PARTNER_WORDS[Math.floor(Math.random() * RT_PARTNER_WORDS.length)];
+    const m = { from: 'partner', text: word, time: exNow() };
+    rt.chat.push(m);
+    rtSave();
+    const chatEl = document.getElementById('rt-chat');
+    if (chatEl) {
+        chatEl.insertAdjacentHTML('beforeend', rtBubble(m));
+        chatEl.scrollTop = chatEl.scrollHeight;
+    }
+    try { if (typeof playSound === 'function') playSound('partner_message'); } catch (e) {}
+}
+/* 对方按自己节奏翻页（与我无关） */
+function rtPartnerTick() {
+    if (!rt) return;
+    const b = rtBook();
+    if (Math.random() < 0.6) {
+        const adv = 1 + Math.floor(Math.random() * 2);
+        b.partnerPage = Math.min(b.pages, b.partnerPage + adv);
+        if (Math.random() < 0.35) {
+            const m = { from: 'partner', sys: true, text: `Ta 翻到了第 ${b.partnerPage} 页`, time: exNow() };
+            rt.chat.push(m);
+            const chatEl = document.getElementById('rt-chat');
+            if (chatEl) { chatEl.insertAdjacentHTML('beforeend', rtBubble(m)); chatEl.scrollTop = chatEl.scrollHeight; }
+        }
+        rtSave();
+        rtRefreshBars();
+    }
+}
+function rtRefreshBars() {
+    const b = rtBook();
+    const pPct = Math.round((b.partnerPage / b.pages) * 100);
+    const bars = document.querySelectorAll('#extras-body .ex-progress');
+    if (bars[1]) bars[1].firstElementChild.style.width = pPct + '%';
+    const label = document.querySelector('#extras-body > div > div');
+}
+/* 我的自动翻页 */
+function rtAutoTick() {
+    if (!rt || !rt.autoTurn) return;
+    const b = rtBook();
+    if (rt.page < b.pages - 1) {
+        rt.page++;
+        rtSave();
+        rtRender();
+    } else {
+        rt.autoTurn = false;
+        rtSave();
+        rtRender();
+        showNotification('自动翻完了，整本书读完啦 🎉', 'success');
+    }
+}
+function rtStartTimers() {
+    rtStopTimers();
+    rt._autoCount = 0;
+    rtTimers.auto = setInterval(() => {
+        try {
+            rt._autoCount++;
+            if (rt.autoTurn && rt._autoCount >= rt.autoSec) { rt._autoCount = 0; rtAutoTick(); }
+        } catch (e) {}
+    }, 1000);
+    rtTimers.partner = setInterval(() => { try { rtPartnerTick(); } catch (e) {} }, (typeof getSiteFrequency === 'function' ? getSiteFrequency('partnerRandomMin', 9) * 60000 : 9000));
+}
+function rtStopTimers() {
+    if (rtTimers.auto) { clearInterval(rtTimers.auto); rtTimers.auto = null; }
+    if (rtTimers.partner) { clearInterval(rtTimers.partner); rtTimers.partner = null; }
+}
+window.rtExit = function() {
+    rtSave();
+    rtStopTimers();
+    showNotification('已退出一起看书，进度已保存 📕', 'info');
+    rt = null;
+    exViewReading();
+};
+
+
+window.exOpenBoard = function() {
+    openExtrasHub();
+    exViewBoard();
+};
+
 function exViewBoard() {
     exSetBody(exHeader('🗒 留言板', `给 ${exEscape(exPartnerName())} 留言`) + `
         <div style="background:var(--message-sent-bg); border-radius:14px; padding:14px; margin-bottom:14px;">
@@ -1594,9 +1860,16 @@ window.exBoardPost = function(mode) {
     document.getElementById('ex-bd-input').value = '';
     exRenderBoardList();
     showNotification('留言已贴上', 'success');
+    // 我留言后，对方 60% 概率过一会儿来回复
+    if (Math.random() < 0.6) {
+        setTimeout(() => {
+            if (typeof exBoardReply === 'function' && !document.getElementById('ex-bd-list')) return;
+            exBoardReply(true);
+        }, 4000 + Math.random() * 9000);
+    }
 };
 
-window.exBoardReply = function() {
+window.exBoardReply = function(auto) {
     // 对方回复一条
     const reply = exGenerateReply(2);
     const post = { id:'bd_'+Date.now(), from:'partner', text:reply, time:exNow() };
@@ -1604,8 +1877,36 @@ window.exBoardReply = function() {
     exSave();
     exRenderBoardList();
     if (typeof playSound === 'function') playSound('partner_message');
-    showNotification(`${exPartnerName()} 回复了`, 'success');
+    showNotification(`${exPartnerName()} ${auto ? '看到了你的留言并回复了' : '回复了'}`, 'success');
 };
+
+/* 对方每天主动在留言板留一句话（每天最多一条） */
+function exBoardPartnerDaily() {
+    if (!exData.messageBoard) exData.messageBoard = [];
+    const today = new Date().toDateString();
+    if (exData.boardLastPartnerDay === today) return;
+    exData.boardLastPartnerDay = today;
+    const name = exMyName();
+    const words = [
+        `早安呀 ${name}！今天也要元气满满哦 ☀️`,
+        `路过留言板，想你了，来看看你 💕`,
+        `今天有没有好好吃饭呀？要记得想我 🍚`,
+        `给你留了一句话：你是我今天最开心的事 😊`,
+        `晚上早点休息，不许熬夜，听话 🌙`,
+        `今天天气怎么样？替我看看云吧 ☁️`,
+        `突然好想跟你聊天，先留个言，等你来找我 💬`,
+        `每日签到：想 ${name} × 100 ✅`,
+        `给你比个心 ❤️ 收到了要在留言板回我哦`,
+        `无论如何，今天也要喜欢你的 🫶`
+    ];
+    const post = { id:'bd_'+Date.now(), from:'partner', text: words[Math.floor(Math.random() * words.length)], time: exNow() };
+    exData.messageBoard.push(post);
+    exSave();
+    try { if (typeof playSound === 'function') playSound('partner_message'); } catch(e) {}
+    showNotification(`${exPartnerName()} 在留言板给你留言了 🗒`, 'success', 4000);
+}
+setInterval(() => { try { exBoardPartnerDaily(); } catch(e) {} }, (typeof getSiteFrequency === 'function' ? getSiteFrequency('boardAutoMin', 30) : 30) * 60000);
+setTimeout(() => { try { exBoardPartnerDaily(); } catch(e) {} }, (typeof getSiteFrequency === 'function' ? getSiteFrequency('boardAutoMin', 30) : 30) * 60000);
 
 function exRenderBoardList() {
     const el = document.getElementById('ex-bd-list');
@@ -3408,6 +3709,27 @@ function exPartnerStartCheckin() {
 }
 
 /* ============ ④主动写信 / ⑤主动提问 ============ */
+/* 从聊天卡片打开信件：打开百宝箱并进入详情 */
+window.exOpenMailFromChat = function(id) {
+    openExtrasHub();
+    exMailboxView(id);
+};
+/* 信件卡片（聊天消息流用）：信封样式，点击查看详情 */
+window.exMailboxCardHtml = function(mbId) {
+    const m = (exData.mailbox || []).find(x => x.id === mbId);
+    if (!m) return '';
+    const isLetter = m.kind === 'letter';
+    const answered = !!m.answer;
+    const tag = isLetter ? (answered ? '✉️ 已回信' : '✉️ 一封来信') : (answered ? '❓ 已回答' : '❓ 一个提问');
+    return `<div onclick="exOpenMailFromChat('${m.id}')" style="background:linear-gradient(135deg,#fdf3e3,#f7e6c4);border:1px solid #e8d4ac;border-radius:12px;padding:12px 14px;width:230px;cursor:pointer;display:flex;align-items:center;gap:10px;">
+        <div style="width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,#e8a87c,#c38d6b);display:flex;align-items:center;justify-content:center;font-size:21px;box-shadow:0 2px 6px rgba(0,0,0,0.15);">${isLetter ? '💌' : '❓'}</div>
+        <div style="flex:1;min-width:0;">
+            <div style="font-size:13px;font-weight:700;color:#6b4f2a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${exEscape(m.title)}</div>
+            <div style="font-size:11px;color:#a07e4e;margin-top:3px;">${tag} · 点击查看</div>
+        </div>
+    </div>`;
+};
+
 function exViewMailbox() {
     exSetBody(exHeader('✉️ 写信 / 提问', '主动给对方写信、发问题') + `
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:12px;">
@@ -3548,12 +3870,27 @@ window.exPartnerSendMail = function(kind) {
         addMessage({
             id: Date.now(), sender:'partner',
             text:(kind==='letter'?'💌【信】':'❓【提问】')+t+'\n'+c,
-            timestamp:new Date(), status:'received', type:'mailbox'
+            timestamp:new Date(), status:'received', type:'mailbox', mailboxId:item.id
         });
     }
     showNotification(`${exPartnerName()} 来了一封${kind==='letter'?'信':'提问'}📩`, 'success', 3500);
     if (typeof playSound === 'function') playSound('partner_message');
 };
+
+/* 对方概率主动写信（每天至多一封，偶尔换成提问） */
+function exPartnerAutoMail() {
+    try {
+        if (typeof exData === 'undefined' || !Array.isArray(exData.mailbox)) return;
+        const today = new Date().toDateString();
+        if (exData.partnerLastMailDay === today) return;    // 今天已写过
+        if (Math.random() > 0.35) return;                   // 35% 概率今天写
+        exData.partnerLastMailDay = today;
+        const kind = Math.random() < 0.75 ? 'letter' : 'question';
+        exPartnerSendMail(kind);
+    } catch(e) {}
+}
+setInterval(exPartnerAutoMail, 2 * 60 * 60000);         // 每 2 小时检查
+setTimeout(exPartnerAutoMail, 5 * 60000);               // 启动 5 分钟后首次检查
 
 /* ============ ⑤邀请陪伴：工作/学习/运动/睡觉 ============ */
 const EX_INVITE_SCENES = {
@@ -3562,6 +3899,34 @@ const EX_INVITE_SCENES = {
     exercise: { icon:'🏃', name:'一起运动',   dur:30 },
     sleep:    { icon:'🌙', name:'一起睡觉',   dur:60 },
 };
+/* 邀请卡片（聊天消息流用）：pending 时带 接受/婉拒 按钮 */
+window.exInvitationCardHtml = function(invId) {
+    const inv = (exData.invitations || []).find(x => x.id === invId);
+    if (!inv) return '';
+    const s = EX_INVITE_SCENES[inv.type] || { icon: '🤝', name: inv.type, dur: inv.durationMin };
+    let footer;
+    if (inv.status === 'accepted') {
+        footer = `<div style="margin-top:9px;padding-top:7px;border-top:1px solid rgba(255,255,255,0.25);font-size:12px;opacity:0.9;">✅ 已接受 · ${s.name}开始啦</div>`;
+    } else if (inv.status === 'rejected') {
+        footer = `<div style="margin-top:9px;padding-top:7px;border-top:1px solid rgba(255,255,255,0.25);font-size:12px;opacity:0.9;">❌ 已婉拒 · 下次再约</div>`;
+    } else {
+        footer = `<div style="display:flex;gap:6px;margin-top:9px;">
+            <button onclick="exInvReply('${inv.id}',true)" style="flex:1;padding:8px 10px;font-size:12px;font-weight:600;border:none;border-radius:8px;background:#fff;color:#00b894;cursor:pointer;">✅ 接受</button>
+            <button onclick="exInvReply('${inv.id}',false)" style="flex:1;padding:8px 10px;font-size:12px;font-weight:600;border:1px solid rgba(255,255,255,0.6);border-radius:8px;background:transparent;color:#fff;cursor:pointer;">❌ 婉拒</button>
+        </div>`;
+    }
+    return `<div id="inv-card-${inv.id}" style="background:linear-gradient(135deg,#00b894,#098e7a);color:#fff;border-radius:12px;padding:13px 14px;width:230px;box-shadow:0 4px 12px rgba(0,184,148,0.25);">
+        <div style="display:flex;align-items:center;gap:10px;">
+            <div style="width:40px;height:40px;border-radius:10px;background:rgba(255,255,255,0.2);display:flex;align-items:center;justify-content:center;font-size:22px;">${s.icon}</div>
+            <div style="flex:1;min-width:0;">
+                <div style="font-size:13px;font-weight:700;">陪我${s.name}</div>
+                <div style="font-size:11px;opacity:0.85;margin-top:2px;">⏱ 时长 ${inv.durationMin} 分钟</div>
+            </div>
+        </div>
+        ${footer}
+    </div>`;
+};
+
 function exViewInvitations() {
     exSetBody(exHeader('🤝 陪伴邀请', '对方可以邀你工作/学习/运动/睡觉') + `
         <div style="background:var(--primary-bg);border:1px solid var(--border-color);border-radius:12px;padding:12px;margin-bottom:12px;">
@@ -3605,6 +3970,14 @@ window.exInvReply = function(id, accept) {
     inv.status = accept ? 'accepted' : 'rejected';
     inv.replyAt = new Date().toISOString();
     exSave();
+    // 同步更新聊天里的邀请卡片
+    const cardEl = document.getElementById('inv-card-' + id);
+    if (cardEl) {
+        const tmp = document.createElement('div');
+        tmp.innerHTML = window.exInvitationCardHtml(id);
+        const fresh = tmp.firstElementChild;
+        if (fresh) cardEl.replaceWith(fresh);
+    }
     const s = EX_INVITE_SCENES[inv.type];
     if (accept) {
         showNotification(`已接受，开始${s.name}模式 ✅`, 'success');

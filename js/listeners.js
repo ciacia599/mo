@@ -194,8 +194,10 @@ if (target.classList.contains('delete-btn')) {
                 }
                 hideModal(DOMElements.pokeModal.modal);
                 DOMElements.pokeModal.input.value = '';
-                const delayRange = settings.replyDelayMax - settings.replyDelayMin;
-                const randomDelay = settings.replyDelayMin + Math.random() * delayRange;
+                const replyMin = typeof getSiteFrequency === 'function' ? getSiteFrequency('replyMinSec', settings.replyDelayMin / 1000) * 1000 : settings.replyDelayMin;
+                const replyMax = typeof getSiteFrequency === 'function' ? getSiteFrequency('replyMaxSec', settings.replyDelayMax / 1000) * 1000 : settings.replyDelayMax;
+                const delayRange = Math.max(0, replyMax - replyMin);
+                const randomDelay = replyMin + Math.random() * delayRange;
                 setTimeout(simulateReply, randomDelay);
             });
 
@@ -765,22 +767,22 @@ if (_chatSettingsEl) _chatSettingsEl.addEventListener('click', () => {
                 if (recvText) receivedBubble.style.color = recvText;
                 if (sentBg) sentBubble.style.background = sentBg;
                 if (sentText) sentBubble.style.color = sentText;
-                receivedBubble.style.fontFamily = settings.messageFontFamily || '';
-                sentBubble.style.fontFamily = settings.messageFontFamily || '';
-                receivedBubble.style.fontSize = (settings.fontSize || 16) + 'px';
-                sentBubble.style.fontSize = (settings.fontSize || 16) + 'px';
-                const customCss = (document.getElementById('custom-bubble-css') || {}).value || '';
-                let previewStyle = document.getElementById('bubble-preview-custom-style');
-                if (!previewStyle) {
-                    previewStyle = document.createElement('style');
-                    previewStyle.id = 'bubble-preview-custom-style';
-                    document.head.appendChild(previewStyle);
-                }
-                previewStyle.textContent = customCss;
-            }
-
-            function updateAvatarSettingsUI() {
-                const enabled = settings.inChatAvatarEnabled;
+                    if (target.classList.contains('delete-btn')) {
+                        if (confirm('确定要删除这条消息吗？')) {
+                            const index = messages.findIndex(m => m.id === messageId);
+                            if (index > -1) {
+                                const savedScrollTop = DOMElements.chatContainer.scrollTop;
+                                messages.splice(index, 1); 
+                                throttledSaveData(); 
+                                renderMessages(true);
+                                requestAnimationFrame(() => {
+                                    DOMElements.chatContainer.scrollTop = savedScrollTop;
+                                });
+                                showNotification('消息已删除', 'success');
+                            }
+                        }
+                        return;
+                    }
                 const pill = document.getElementById('avatar-toggle-pill-2');
                 const knob = document.getElementById('avatar-toggle-knob-2');
                 const statusText = document.getElementById('avatar-toggle-status-2');
@@ -3059,8 +3061,10 @@ playlist.style.top = (rect.top + (player.classList.contains('collapsed') ? 65 : 
                             playSound('send');
                             currentReplyTo = null;
                             updateReplyPreview();
-                            const delayRange = settings.replyDelayMax - settings.replyDelayMin;
-                            const randomDelay = settings.replyDelayMin + Math.random() * delayRange;
+                            const replyMin = typeof getSiteFrequency === 'function' ? getSiteFrequency('replyMinSec', settings.replyDelayMin / 1000) * 1000 : settings.replyDelayMin;
+                            const replyMax = typeof getSiteFrequency === 'function' ? getSiteFrequency('replyMaxSec', settings.replyDelayMax / 1000) * 1000 : settings.replyDelayMax;
+                            const delayRange = Math.max(0, replyMax - replyMin);
+                            const randomDelay = replyMin + Math.random() * delayRange;
                             setTimeout(simulateReply, randomDelay);
 
 

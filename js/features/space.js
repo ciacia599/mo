@@ -78,8 +78,8 @@ function spSetBody(html) {
 
 function spHeader(title, sub) {
     return `
-        <div style="display:flex;align-items:center;gap:10px;padding:14px 16px;background:linear-gradient(135deg,#a8edea 0%,#fed6e3 100%);">
-            <button onclick="spBackToHub()" style="background:rgba(255,255,255,0.3);border:none;color:#333;width:28px;height:28px;border-radius:50%;cursor:pointer;">←</button>
+        <div style="display:flex;align-items:center;gap:10px;padding:14px 16px;background:linear-gradient(135deg, rgba(185,164,139,0.30), rgba(240,213,188,0.45), rgba(255,255,255,0.55));border-bottom:1px solid rgba(var(--accent-color-rgb,197,164,126),0.12);">
+            <button onclick="spBackToHub()" style="background:rgba(255,255,255,0.46);border:none;color:#333;width:28px;height:28px;border-radius:50%;cursor:pointer;box-shadow:0 4px 12px rgba(74,56,48,0.08);">←</button>
             <div style="flex:1;">
                 <div style="font-size:16px;font-weight:700;color:#333;">${title}</div>
                 ${sub ? `<div style="font-size:11px;color:#555;">${sub}</div>` : ''}
@@ -94,22 +94,23 @@ function spRenderHub() {
         { key: 'album',   icon: '🖼️', name: '相册', desc: '共同回忆', color: '#A29BFE', bg: 'linear-gradient(135deg,#A29BFE,#6C5CE7)' },
         { key: 'diary',   icon: '📔', name: '心情手账', desc: '记录情绪', color: '#FFD93D', bg: 'linear-gradient(135deg,#FFD93D,#FF9A8B)' },
         { key: 'memorial',icon: '💝', name: '纪念日', desc: '倒计时', color: '#FF6B6B', bg: 'linear-gradient(135deg,#FF6B6B,#EE5A6F)' },
+        { key: 'music',   icon: '🎵', name: '听歌房', desc: '共同歌单与音乐', color: '#7E8CE0', bg: 'linear-gradient(135deg,#7E8CE0,#B7B5E8)' },
         { key: 'cinema',  icon: '🎬', name: '电影院', desc: '边看边聊', color: '#00B894', bg: 'linear-gradient(135deg,#00B894,#00CEC9)' },
     ];
     spSetBody(`
-        <div style="padding:24px 18px 22px;background:linear-gradient(135deg,#a8edea 0%,#fed6e3 100%);color:#333;">
+        <div style="padding:24px 18px 22px;background:linear-gradient(135deg, rgba(196,172,151,0.26), rgba(248,220,203,0.36), rgba(255,255,255,0.44));color:#333;">
             <div style="display:flex;justify-content:space-between;align-items:center;">
                 <div>
                     <div style="font-size:20px;font-weight:700;">✨ 我们的空间</div>
                     <div style="font-size:11px;opacity:0.85;margin-top:2px;">共同的生活画卷</div>
                 </div>
-                <button onclick="spClose()" style="background:rgba(255,255,255,0.4);border:none;color:#333;width:30px;height:30px;border-radius:50%;cursor:pointer;">✕</button>
+                <button onclick="spClose()" style="background:rgba(255,255,255,0.46);border:none;color:#333;width:30px;height:30px;border-radius:50%;cursor:pointer;box-shadow:0 4px 12px rgba(74,56,48,0.08);">✕</button>
             </div>
         </div>
         <div style="padding:18px;">
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">
-                ${items.slice(0,4).map(it => `
-                    <div onclick="spOpen('${it.key}')" style="background:${it.bg};border-radius:14px;padding:14px;color:#fff;cursor:pointer;min-height:80px;display:flex;flex-direction:column;justify-content:space-between;" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
+                ${items.slice(0,5).map(it => `
+                    <div onclick="spOpen('${it.key}')" style="background:linear-gradient(135deg, rgba(255,255,255,0.42), ${it.color}33);border:1px solid rgba(255,255,255,0.36);border-radius:16px;padding:14px;color:#3f2e2a;cursor:pointer;min-height:80px;display:flex;flex-direction:column;justify-content:space-between;box-shadow:0 14px 26px rgba(61,45,36,0.08);" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
                         <div style="font-size:26px;">${it.icon}</div>
                         <div>
                             <div style="font-size:13px;font-weight:700;">${it.name}</div>
@@ -119,10 +120,10 @@ function spRenderHub() {
                 `).join('')}
             </div>
             <!-- 电影院占整行 -->
-            <div onclick="spOpen('cinema')" style="background:${items[4].bg};border-radius:14px;padding:18px;color:#fff;cursor:pointer;display:flex;align-items:center;gap:14px;" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
-                <div style="font-size:36px;">${items[4].icon}</div>
+            <div onclick="spOpen('cinema')" style="background:linear-gradient(135deg, rgba(255,255,255,0.42), ${items[5].color}33);border:1px solid rgba(255,255,255,0.36);border-radius:16px;padding:18px;color:#3f2e2a;cursor:pointer;display:flex;align-items:center;gap:14px;box-shadow:0 14px 26px rgba(61,45,36,0.08);" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
+                <div style="font-size:36px;">${items[5].icon}</div>
                 <div style="flex:1;">
-                    <div style="font-size:15px;font-weight:700;">${items[4].name}</div>
+                    <div style="font-size:15px;font-weight:700;">${items[5].name}</div>
                     <div style="font-size:11px;opacity:0.9;margin-top:2px;">边看边聊 · ${spData.cinema.history.length}部已看 · ${spData.cinema.plans.length}个待约</div>
                 </div>
                 <div style="font-size:14px;opacity:0.7;">›</div>
@@ -131,11 +132,31 @@ function spRenderHub() {
     `);
 }
 
+function spViewMusic() {
+    spSetBody(spHeader('🎵 听歌房', '把一首歌放进今天的共同记忆') + `
+        <div style="padding:18px;">
+            <div style="padding:18px;border-radius:18px;background:linear-gradient(135deg,rgba(126,140,224,.18),rgba(255,255,255,.56));border:1px solid rgba(126,140,224,.18);margin-bottom:14px;">
+                <div style="font-size:30px;margin-bottom:10px;">🎧</div>
+                <div style="font-size:15px;font-weight:700;color:var(--text-primary);">共同听歌</div>
+                <div style="font-size:12px;line-height:1.7;color:var(--text-secondary);margin-top:6px;">打开原有音乐播放器，继续使用你的歌单、搜索、添加歌曲、导入导出和播放控制。</div>
+            </div>
+            <button class="ex-primary-btn" style="width:100%;" onclick="spOpenMusicPlayer()">打开音乐播放器</button>
+            <div style="font-size:11px;color:var(--text-secondary);text-align:center;margin-top:10px;">播放器数据仍保存在本机，不会覆盖聊天记录。</div>
+        </div>
+    `);
+}
+
+window.spOpenMusicPlayer = function () {
+    const toggle = document.getElementById('music-player-toggle');
+    if (toggle) toggle.click();
+    else if (typeof showNotification === 'function') showNotification('请先在设置中启用音乐播放器', 'info');
+};
+
 window.spBackToHub = spRenderHub;
 
 function spOpen(key) {
     if (typeof playSound === 'function') playSound('mood');
-    const map = { moments: spViewMoments, album: spViewAlbum, diary: spViewDiary, memorial: spViewMemorial, cinema: spViewCinema };
+    const map = { moments: spViewMoments, album: spViewAlbum, diary: spViewDiary, memorial: spViewMemorial, music: spViewMusic, cinema: spViewCinema };
     if (map[key]) map[key]();
 }
 window.spOpen = spOpen;
@@ -608,6 +629,58 @@ window.spCinemaStartPlan = function(planId) {
     spCinemaDoStart(p.title, p.videoUrl, p.videoType);
 };
 
+let spCinemaCtrlTimer = null;
+function spCinemaBubbleHtml(c) {
+    if (c.sys) {
+        return `<div style="text-align:center;margin:7px 0;"><span style="font-size:10px;background:rgba(0,0,0,0.12);color:#666;padding:2px 9px;border-radius:9px;">${spEscape(c.text)}</span></div>`;
+    }
+    const mine = c.from === 'me';
+    const t = new Date(c.time).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+    return `<div style="display:flex;justify-content:${mine ? 'flex-end' : 'flex-start'};margin-bottom:7px;">
+        <div style="max-width:76%;padding:7px 11px;border-radius:12px;font-size:12px;line-height:1.5;
+            background:${mine ? '#00B894' : '#fff'};color:${mine ? '#fff' : '#333'};
+            box-shadow:0 1px 3px rgba(0,0,0,0.1);">${spEscape(c.text)}
+            <div style="font-size:9px;opacity:0.6;margin-top:2px;text-align:${mine ? 'right' : 'left'};">${t}</div>
+        </div></div>`;
+}
+function spCinemaAppendBubble(c) {
+    const el = document.getElementById('sp-cinema-chat');
+    if (!el) return;
+    el.insertAdjacentHTML('beforeend', spCinemaBubbleHtml(c));
+    el.scrollTop = el.scrollHeight;
+}
+/* 对方操控播放：暂停/继续/快进/快退 */
+function spCinemaPartnerControl() {
+    if (!spData.cinema.currentVideo) return;
+    if (Math.random() > 0.55) return;
+    const video = document.querySelector('#sp-modal-inner video');
+    const acts = ['pause', 'play', 'seekFwd', 'seekBack'];
+    const act = acts[Math.floor(Math.random() * acts.length)];
+    let text = '';
+    if (act === 'pause') {
+        text = '⏸ Ta 暂停了播放，等你一下';
+        if (video) { try { video.pause(); } catch (e) {} }
+    } else if (act === 'play') {
+        text = '▶ Ta 继续播放啦';
+        if (video) { try { video.play(); } catch (e) {} }
+    } else if (act === 'seekFwd') {
+        const s = 30 + Math.floor(Math.random() * 120);
+        if (video && isFinite(video.duration)) {
+            video.currentTime = Math.min(video.duration - 2, video.currentTime + s);
+        }
+        text = `⏩ Ta 快进了 ${s} 秒`;
+    } else {
+        const s = 15 + Math.floor(Math.random() * 60);
+        if (video) video.currentTime = Math.max(0, video.currentTime - s);
+        text = `⏪ Ta 回退了 ${s} 秒，想再看一遍`;
+    }
+    const c = { id: 'cc_' + Date.now(), from: 'partner', sys: true, text, time: new Date().toISOString() };
+    spData.cinema.chat.push(c);
+    spSaveData();
+    spCinemaAppendBubble(c);
+    try { if (typeof playSound === 'function') playSound('partner_message'); } catch (e) {}
+}
+
 function spCinemaPlayer(title, url, type) {
     let videoHtml = '';
     if (type === 'bilibili') {
@@ -622,16 +695,14 @@ function spCinemaPlayer(title, url, type) {
     } else {
         videoHtml = `<video src="${url}" controls autoplay style="width:100%;max-height:240px;border-radius:10px;background:#000;"></video>`;
     }
-    spSetBody(spHeader('🎬 ' + title, '边看边聊') + `
+    spSetBody(spHeader('🎬 ' + title, '边看边聊 · Ta 可以操控播放') + `
         <div style="padding:14px;">
             ${videoHtml}
             <div style="display:flex;align-items:center;gap:6px;margin-top:12px;font-size:12px;color:var(--text-secondary);">
                 <span>💬 边看边聊</span>
-                <span style="margin-left:auto;background:#E8F5E9;color:#2E7D32;padding:2px 8px;border-radius:10px;font-size:10px;">已同步</span>
+                <span style="margin-left:auto;font-size:10px;color:#00B894;">Ta 也能暂停/快进播放</span>
             </div>
-            <div id="sp-cinema-chat" style="background:var(--message-received-bg);border-radius:10px;padding:10px;max-height:200px;overflow-y:auto;margin-top:8px;font-size:12px;">
-                ${(spData.cinema.chat||[]).map(c => `<div style="margin-bottom:6px;"><b style="color:${c.from==='me'?'var(--accent-color)':'#00B894'}">${c.from==='me'?'我':'Ta'}:</b> ${spEscape(c.text)}</div>`).join('') || '<div style="color:var(--text-secondary);text-align:center;padding:8px;">开始聊天吧～</div>'}
-            </div>
+            <div id="sp-cinema-chat" style="background:var(--secondary-bg);border-radius:10px;padding:10px;max-height:210px;overflow-y:auto;margin-top:8px;font-size:12px;"></div>
             <div style="display:flex;gap:6px;margin-top:8px;">
                 <input id="sp-cinema-msg" placeholder="说点什么..." style="flex:1;padding:8px;border:1px solid var(--border-color);border-radius:8px;background:var(--secondary-bg);color:var(--text-primary);font-size:12px;" onkeydown="if(event.key==='Enter')spCinemaSendChat()">
                 <button onclick="spCinemaSendChat()" class="ex-primary-btn" style="padding:8px 14px;font-size:12px;">发送</button>
@@ -639,39 +710,39 @@ function spCinemaPlayer(title, url, type) {
             <button onclick="spCinemaStop()" class="ex-quick-btn" style="width:100%;margin-top:10px;color:#E17055;">⏹ 结束观影</button>
         </div>
     `);
-    // 滚动到底部
     const chat = document.getElementById('sp-cinema-chat');
-    if (chat) chat.scrollTop = chat.scrollHeight;
+    if (chat) {
+        chat.innerHTML = (spData.cinema.chat || []).map(spCinemaBubbleHtml).join('');
+        chat.scrollTop = chat.scrollHeight;
+    }
+    // 对方每 20~40 秒尝试操控一次播放
+    if (spCinemaCtrlTimer) clearInterval(spCinemaCtrlTimer);
+    spCinemaCtrlTimer = setInterval(spCinemaPartnerControl, 25000);
 }
 
 window.spCinemaSendChat = function() {
     const input = document.getElementById('sp-cinema-msg');
     if (!input || !input.value.trim()) return;
     if (!spData.cinema.chat) spData.cinema.chat = [];
-    spData.cinema.chat.push({ id:'cc_'+Date.now(), from:'me', text: input.value.trim(), time:new Date().toISOString() });
-    input.value = '';
+    const mine = { id:'cc_'+Date.now(), from:'me', text: input.value.trim(), time:new Date().toISOString() };
+    spData.cinema.chat.push(mine);
     spSaveData();
-    // 重新渲染聊天区
-    const chat = document.getElementById('sp-cinema-chat');
-    if (chat) {
-        chat.innerHTML = spData.cinema.chat.map(c => `<div style="margin-bottom:6px;"><b style="color:${c.from==='me'?'var(--accent-color)':'#00B894'}">${c.from==='me'?'我':'Ta'}:</b> ${spEscape(c.text)}</div>`).join('');
-        chat.scrollTop = chat.scrollHeight;
-    }
-    // 模拟对方回复
+    spCinemaAppendBubble(mine);
+    input.value = '';
+    // 模拟对方回复（气泡）
     setTimeout(() => {
-        const replies = ['哈哈这段太好笑了', '我也想看这个', '陪你看下去', '这个画面好美', '🥰', '你笑点真低～', '继续继续'];
+        if (!spData.cinema.currentVideo) return;
+        const replies = ['哈哈这段太好笑了', '这个画面好美', '🥰', '你笑点真低～', '继续继续', '看到这里有点感动', '等下，刚才那个镜头倒回去'];
         const r = replies[Math.floor(Math.random()*replies.length)];
-        spData.cinema.chat.push({ id:'cc_'+Date.now(), from:'partner', text: r, time:new Date().toISOString() });
+        const c = { id:'cc_'+Date.now(), from:'partner', text: r, time:new Date().toISOString() };
+        spData.cinema.chat.push(c);
         spSaveData();
-        const chat2 = document.getElementById('sp-cinema-chat');
-        if (chat2) {
-            chat2.innerHTML = spData.cinema.chat.map(c => `<div style="margin-bottom:6px;"><b style="color:${c.from==='me'?'var(--accent-color)':'#00B894'}">${c.from==='me'?'我':'Ta'}:</b> ${spEscape(c.text)}</div>`).join('');
-            chat2.scrollTop = chat2.scrollHeight;
-        }
-    }, 1500 + Math.random()*2000);
+        spCinemaAppendBubble(c);
+    }, 1500 + Math.random()*2500);
 };
 
 window.spCinemaStop = function() {
+    if (spCinemaCtrlTimer) { clearInterval(spCinemaCtrlTimer); spCinemaCtrlTimer = null; }
     if (spData.cinema.currentVideo) {
         spData.cinema.history.push({ id:'ch_'+Date.now(), title: spData.cinema.currentVideo.title, watchedAt:new Date().toISOString(), type: spData.cinema.currentVideo.type });
         if (spData.cinema.history.length > 50) spData.cinema.history = spData.cinema.history.slice(-50);

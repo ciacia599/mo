@@ -27,6 +27,9 @@
         connectingTimer: null,
         randomCallTimer: null,
         isPartnerCall:   false,
+        incomingNotif:   null,   // 系统通知对象
+        ringtoneCtx:     null,   // 铃声 AudioContext
+        ringtoneTimer:   null,   // 铃声循环定时器
     };
 
     const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -633,6 +636,7 @@ html:not([data-theme="dark"])[data-color-theme="black-white"] .message-sent{
     }
 
     function endCall() {
+        closeIncomingNotification();
         if (!S.active) return;
         const dur = S.elapsed;
         const startedAt = S.startTime ? new Date(S.startTime).toISOString() : new Date(Date.now() - dur).toISOString();
@@ -681,12 +685,93 @@ html:not([data-theme="dark"])[data-color-theme="black-white"] .message-sent{
             showNotification('通话已挂断', 'info', 2000);
     }
 
+    /* ===== 后台系统通知 + 铃声 ===== */
+    function requestNotifPermission() {
+        if (typeof Notification === 'undefined') return;
+        if (Notification.permission === 'default') {
+            try { Notification.requestPermission(); } catch (e) {
+                try { Notification.requestPermission().catch(() => {}); } catch (_) {}
+            }
+        }
+    }
+
+    // 用 Web Audio 合成一段电话铃声（双音交替）
+    function playRingtone() {
+        stopRingtone();
+        try {
+            const AC = window.AudioContext || window.webkitAudioContext;
+            if (!AC) return;
+            S.ringtoneCtx = new AC();
+            const ctx = S.ringtoneCtx;
+            if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+            const beep = (freq, start, dur) => {
+                const o = ctx.createOscillator();
+                const g = ctx.createGain();
+                o.type = 'sine'; o.frequency.value = freq;
+                o.connect(g); g.connect(ctx.destination);
+                g.gain.setValueAtTime(0.0001, ctx.currentTime + start);
+                g.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + start + 0.02);
+                g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + start + dur);
+                o.start(ctx.currentTime + start);
+                o.stop(ctx.currentTime + start + dur + 0.02);
+            };
+            const pattern = () => {
+                beep(880, 0, 0.4);
+                beep(660, 0.45, 0.4);
+            };
+            pattern();
+            S.ringtoneTimer = setInterval(pattern, 1200);
+        } catch (e) { /* 忽略 */ }
+    }
+    function stopRingtone() {
+        if (S.ringtoneTimer) { clearInterval(S.ringtoneTimer); S.ringtoneTimer = null; }
+        if (S.ringtoneCtx) {
+            try { S.ringtoneCtx.close(); } catch (e) {}
+            S.ringtoneCtx = null;
+        }
+    }
+
+    function fireIncomingNotification() {
+        if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+        closeIncomingNotification();
+        const name = getName();
+        const type = (S.callType === 'video' ? '视频' : '语音') + '通话';
+        try {
+            const n = new Notification(name + ' 来电中…', {
+                body: `${type} · 点击接听`,
+                tag: 'call-incoming',
+                requireInteraction: true,
+                silent: false   // 后台时由系统播放通知铃声
+            });
+            n.onclick = () => {
+                window.focus();
+                try {
+                    document.getElementById('call-incoming-overlay')?.classList.remove('visible');
+                    clearTimeout(S.incomingTimer);
+                    startCall(true);
+                } catch (e) {}
+                n.close();
+            };
+            S.incomingNotif = n;
+        } catch (e) { /* 忽略 */ }
+    }
+    function closeIncomingNotification() {
+        if (S.incomingNotif) {
+            try { S.incomingNotif.close(); } catch (e) {}
+            S.incomingNotif = null;
+        }
+        stopRingtone();
+    }
+
     function showIncomingCall() {
         if (!S.enabled || S.active) return;
         const ov = document.getElementById('call-incoming-overlay');
         if (!ov) return;
         fillAv('call-inc-avatar'); fillNm('call-inc-name');
         ov.classList.add('visible');
+        // 后台系统通知 + 铃声（即使页面未聚焦也能收到提醒）
+        fireIncomingNotification();
+        playRingtone();
         clearTimeout(S.incomingTimer);
 
         const autoRejectChance = 0.30;
@@ -695,6 +780,7 @@ html:not([data-theme="dark"])[data-color-theme="black-white"] .message-sent{
             S.incomingTimer = setTimeout(() => {
                 if (!ov.classList.contains('visible')) return;
                 ov.classList.remove('visible');
+                closeIncomingNotification();
                 const myName = (typeof settings !== 'undefined' && settings.myName) || '我';
                 const partnerName = getName();
                 const rejectLabels = [
@@ -710,6 +796,7 @@ html:not([data-theme="dark"])[data-color-theme="black-white"] .message-sent{
             S.incomingTimer = setTimeout(() => {
                 if (!ov.classList.contains('visible')) return;
                 ov.classList.remove('visible');
+                closeIncomingNotification();
                 const myName = (typeof settings !== 'undefined' && settings.myName) || '我';
                 sendCallEvent('fa-phone-slash', `${myName}未接听 ${getName()} 的来电`, null);
             }, 22000);
@@ -852,6 +939,7 @@ html:not([data-theme="dark"])[data-color-theme="black-white"] .message-sent{
         document.getElementById('call-inc-reject')?.addEventListener('click', () => {
             document.getElementById('call-incoming-overlay')?.classList.remove('visible');
             clearTimeout(S.incomingTimer);
+            closeIncomingNotification();
             const myName = (typeof settings !== 'undefined' && settings.myName) || '我';
             sendCallEvent('fa-phone-slash', `${myName}拒绝了 ${getName()} 的通话`, null);
             try {
@@ -869,7 +957,7 @@ html:not([data-theme="dark"])[data-color-theme="black-white"] .message-sent{
         });
         document.getElementById('call-inc-accept')?.addEventListener('click', () => {
             document.getElementById('call-incoming-overlay')?.classList.remove('visible');
-            clearTimeout(S.incomingTimer); startCall(true);
+            clearTimeout(S.incomingTimer); closeIncomingNotification(); startCall(true);
         });
 
         document.getElementById('call-hangup-btn')?.addEventListener('click', endCall);
@@ -920,7 +1008,8 @@ html:not([data-theme="dark"])[data-color-theme="black-white"] .message-sent{
             const collapsedCallBtn = document.getElementById('collapsed-call-btn');
             if (collapsedCallBtn) collapsedCallBtn.style.display = S.enabled ? '' : 'none';
             if (!S.enabled && S.active) endCall();
-            S.enabled ? scheduleRandomCall() : clearTimeout(S.randomCallTimer);
+            if (S.enabled) { requestNotifPermission(); scheduleRandomCall(); }
+            else { clearTimeout(S.randomCallTimer); closeIncomingNotification(); }
         });
 
         initDrag(); initPillDrag(); initResize();
@@ -936,7 +1025,7 @@ html:not([data-theme="dark"])[data-color-theme="black-white"] .message-sent{
 
         const late = () => {
             injectToolbarBtn();
-            if (S.enabled) scheduleRandomCall();
+            if (S.enabled) { requestNotifPermission(); scheduleRandomCall(); }
             const syncCallToggle = () => {
                 const tog = document.getElementById('call-enabled-toggle');
                 if (tog) {

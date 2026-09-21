@@ -1067,8 +1067,21 @@ function createMessageFragment(msg, prevMsg, nextMsg, lastSenderRef) {
     // 红包消息 → 渲染为微信风格红包卡片（可点击领取）
     if (msg.type === 'redpacket' && msg.redpacketId && typeof window.exRedpacketCardHtml === 'function') {
         content = window.exRedpacketCardHtml(msg.redpacketId);
+    } else if (msg.type === 'invitation' && msg.invitationId && typeof window.exInvitationCardHtml === 'function') {
+        // 陪伴邀请 → 卡片（带 接受/婉拒 按钮）
+        content = window.exInvitationCardHtml(msg.invitationId);
+    } else if (msg.type === 'mailbox' && msg.mailboxId && typeof window.exMailboxCardHtml === 'function') {
+        // 信件/提问 → 信封卡片（点击查看）
+        content = window.exMailboxCardHtml(msg.mailboxId);
     } else {
-        content = msg.text ? `<div>${msg.text.replace(/\n/g, '<br>')}</div>` : '';
+        const escapedText = msg.text ? String(msg.text)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;')
+            .replace(/\n/g, '<br>') : '';
+        content = msg.text ? `<div class="message-text">${escapedText}</div>` : '';
         if (msg.image) content += `<img src="${msg.image}" class="message-image${isImageOnly ? ' message-image-only' : ''}" alt="图片" style="max-width:${isImageOnly ? '100px' : '100px'}; border-radius: 12px;${!isImageOnly ? ' margin-top: 6px;' : ''} cursor: pointer;" onclick="viewImage('${msg.image}')">`;
     }
     messageHTML += content;

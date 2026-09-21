@@ -51,7 +51,7 @@ const TG_PRESET_MINUTES = [5, 10, 15, 20, 25, 30];
 /* ======================== 主入口：陪伴中心 ======================== */
 let tgModal = null;
 
-async function openTogetherMode() {
+async function openTogetherMode(renderHub) {
     await tgLoadData();
     const existing = document.getElementById('tg-modal');
     if (existing) { existing.remove(); }
@@ -60,16 +60,31 @@ async function openTogetherMode() {
     modal.id = 'tg-modal';
     modal.className = 'modal';
     modal.style.zIndex = '9100';
-    modal.innerHTML = `<div class="modal-content" style="max-width:480px;padding:0;overflow:hidden;" id="tg-modal-inner"></div>`;
+    modal.innerHTML = `<div class="modal-content" style="max-width:480px;width:100%;padding:0;overflow:hidden;max-height:92vh;display:flex;flex-direction:column;" id="tg-modal-inner"></div>`;
     document.body.appendChild(modal);
     tgModal = modal;
-    modal.addEventListener('click', (e) => { if (e.target === modal) tgClose(); });
-    tgRenderHub();
+    modal.addEventListener('click', (e) => { if (e.target === modal) tgFinish(window.currentTgRecord, false); });
+    if (renderHub !== false) tgRenderHub();
     // 关键修复：调用全局 showModal() 才会真正把 modal 从 display:none → display:flex
     try { if (typeof showModal === 'function') showModal(modal); else modal.style.display = 'flex'; } catch (_) { modal.style.display = 'flex'; }
+    return modal;
 }
 
 window.openTogetherMode = openTogetherMode;
+
+/* 邀请接受后的统一跳转入口：togLaunch(场景, 分钟)
+ * extras.js 场景: work/study/exercise/sleep → 映射到本文件 work/study/sport/sleep */
+window.togLaunch = async function(type, durationMin) {
+    await tgLoadData();
+    const map = { exercise: 'sport' };
+    const key = map[type] || type;
+    tgSelectedScene = TG_SCENES.find(s => s.key === key);
+    if (!tgSelectedScene) return;
+    if (!document.getElementById('tg-modal')) {
+        await openTogetherMode(false);
+    }
+    tgStart(parseInt(durationMin, 10) || 30);
+};
 
 function tgClose() {
     if (!tgModal) return;
@@ -193,12 +208,49 @@ function tgStart(minutes) {
     tgData.history.push(record);
     if (tgData.history.length > 100) tgData.history = tgData.history.slice(-100);
     tgSaveData();
+    // 运行时状态：消息列表 + 背景
+    tgRunMsgs = [{ from: 'partner', text: tgWelcome(tgSelectedScene.key), time: Date.now() }];
+    tgRunBg = tgData.lastBg || tgSelectedScene.bg;
     tgRenderRunning(record);
 }
 
 window.tgStart = tgStart;
 
 let tgInterval = null;
+let tgRunMsgs = [];
+let tgRunBg = null;
+
+/* 场景欢迎语 & 回复语库 */
+function tgWelcome(key) {
+    return ({
+        work: '好，开始工作吧，我在你旁边陪着你 💻',
+        study: '一起加油！有不会的可以和我讨论 📚',
+        sleep: '晚安啦，抱着你一起睡 🌙',
+        sport: '动起来！我在旁边给你加油 🏃'
+    })[key] || '开始吧，我陪着你 ❤️';
+}
+const TG_REPLY_POOL = {
+    work: ['工作辛苦了，等下给你倒杯水 ☕', '效率不错嘛，继续保持 💻', '嗯…我也在忙，一起专心', '累了就歇一分钟，我给你捏捏肩'],
+    study: ['这道题…我觉得再想想？🤔', '认真学习的样子真好看 📚', '学到了记得教我哦', '加油，你一定可以的 💪'],
+    sleep: ['嘘，快睡吧，我在呢 🌙', '晚安，做个有我的好梦', '被子盖好，别着凉', '…我偷偷亲你一下，你没发现吧'],
+    sport: ['加油！再坚持一下 💪', '慢点运动，注意别受伤', '出汗的样子真有活力 ✨', '休息一下喝口水，我等你']
+};
+const TG_REPLY_GENERAL = ['嗯嗯，我一直在你身边 ❤️', '加油哦，我陪着你', '想你了，悄悄看你一眼 😊', '专心的你最迷人了', '好，一起坚持到最后！', '收到～我也爱你 🫶'];
+function tgEsc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/* 背景预设 */
+const TG_BG_PRESETS = [
+    ['梦幻紫', 'linear-gradient(135deg,#667eea,#764ba2)'],
+    ['蜜桃粉', 'linear-gradient(135deg,#f093fb,#f5576c)'],
+    ['海洋蓝', 'linear-gradient(135deg,#4facfe,#00f2fe)'],
+    ['薄荷绿', 'linear-gradient(135deg,#43e97b,#38f9d7)'],
+    ['暖橙', 'linear-gradient(135deg,#fa709a,#fee140)'],
+    ['星空', 'linear-gradient(135deg,#30cfd0,#330867)'],
+    ['深夜', 'linear-gradient(135deg,#2D3561,#6C5CE7)'],
+    ['烈焰', 'linear-gradient(135deg,#FF6B6B,#EE5A6F)']
+];
 
 function tgRenderRunning(record) {
     const scene = TG_SCENES.find(s => s.key === record.scene);
@@ -221,58 +273,165 @@ function tgRenderRunning(record) {
         const tipEl = document.getElementById('tg-tip');
         if (timerEl) timerEl.textContent = `${p}:${s}`;
         if (progEl) progEl.style.width = progress + '%';
-        // 状态切换提示
         if (tipEl) {
             if (min === 0 && sec <= 30 && sec > 0) tipEl.textContent = '马上结束啦～';
             else if (min === 1 && sec === 0) tipEl.textContent = '还剩 1 分钟，准备收尾';
         }
     }
     tgSetBody(`
-        <div style="padding:30px 18px 26px;background:${scene.bg};color:#fff;text-align:center;">
-            <div style="font-size:52px;margin-bottom:10px;">${scene.icon}</div>
-            <div style="font-size:18px;font-weight:700;margin-bottom:4px;">${scene.name}</div>
-            <div id="tg-tip" style="font-size:12px;opacity:0.9;margin-bottom:18px;">${scene.tip}</div>
-            <div id="tg-timer" style="font-size:56px;font-weight:700;font-family:'Courier New',monospace;letter-spacing:2px;text-shadow:0 2px 12px rgba(0,0,0,0.25);">--:--</div>
-            <div style="background:rgba(255,255,255,0.18);border-radius:50px;height:6px;margin-top:18px;overflow:hidden;">
-                <div id="tg-progress-bar" style="background:#fff;height:100%;width:0%;transition:width 1s linear;"></div>
+        <div id="tg-hero" style="background:${tgRunBg};color:#fff;padding:14px 16px 16px;flex-shrink:0;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                <button onclick="tgFinish(currentTgRecord,false)" title="提前结束回聊天" style="background:rgba(255,255,255,0.22);border:none;color:#fff;width:30px;height:30px;border-radius:50%;cursor:pointer;font-size:14px;">✕</button>
+                <div style="font-size:12px;font-weight:600;opacity:0.95;">${scene.icon} ${scene.name}中</div>
+                <button onclick="tgTogglePanel('tg-bg-panel')" title="更换背景" style="background:rgba(255,255,255,0.22);border:none;color:#fff;width:30px;height:30px;border-radius:50%;cursor:pointer;font-size:14px;">🎨</button>
             </div>
-            <div style="margin-top:14px;font-size:11px;opacity:0.85;">共 ${record.minutes} 分钟 · 开始于 ${new Date(record.startAt).toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit'})}</div>
+            <div id="tg-bg-panel" style="display:none;background:rgba(0,0,0,0.25);border-radius:10px;padding:10px;margin-bottom:10px;">
+                <div style="font-size:11px;margin-bottom:7px;opacity:0.9;">选择背景（自动记住）</div>
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:8px;">
+                    ${TG_BG_PRESETS.map(b => `<button onclick="tgApplyBg(this,'${b[1]}')" title="${b[0]}" style="height:26px;border:2px solid rgba(255,255,255,0.5);border-radius:6px;background:${b[1]};cursor:pointer;"></button>`).join('')}
+                </div>
+                <input type="file" id="tg-bg-upload" accept="image/*" style="display:none;" onchange="tgBgUpload(event)">
+                <button onclick="document.getElementById('tg-bg-upload').click()" style="width:100%;padding:6px;font-size:11px;background:rgba(255,255,255,0.9);color:#444;border:none;border-radius:7px;cursor:pointer;">📷 上传自己的背景图片</button>
+            </div>
+            <div style="text-align:center;">
+                <div id="tg-timer" style="font-size:48px;font-weight:700;font-family:'Courier New',monospace;letter-spacing:2px;text-shadow:0 2px 12px rgba(0,0,0,0.3);">--:--</div>
+                <div style="background:rgba(255,255,255,0.2);border-radius:50px;height:6px;margin-top:12px;overflow:hidden;">
+                    <div id="tg-progress-bar" style="background:#fff;height:100%;width:0%;transition:width 1s linear;"></div>
+                </div>
+                <div id="tg-tip" style="font-size:11px;opacity:0.9;margin-top:9px;">${scene.tip}</div>
+                <div style="font-size:10px;opacity:0.8;margin-top:3px;">共 ${record.minutes} 分钟 · ${new Date(record.startAt).toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit'})} 开始</div>
+            </div>
         </div>
-        <div style="padding:18px;">
-            <div style="background:var(--message-received-bg);border-radius:12px;padding:14px;text-align:center;font-size:12px;color:var(--text-secondary);line-height:1.6;margin-bottom:14px;">
-                陪伴进行中…<br>专注此刻，享受彼此的存在
+
+        <div id="tg-msgs" style="flex:1;overflow-y:auto;min-height:110px;max-height:230px;padding:10px 12px;background:var(--secondary-bg);"></div>
+
+        <div style="display:flex;gap:6px;padding:8px 10px;background:var(--primary-bg);border-top:1px solid var(--border-color);flex-shrink:0;">
+            <input id="tg-msg-input" placeholder="边陪伴边聊天…" onkeydown="if(event.key==='Enter')tgSendMsg()" style="flex:1;padding:8px 12px;border:1px solid var(--border-color);border-radius:20px;background:var(--secondary-bg);color:var(--text-primary);font-size:12px;">
+            <button onclick="tgSendMsg()" style="padding:0 16px;border:none;border-radius:20px;background:var(--accent-color);color:#fff;font-size:12px;font-weight:600;cursor:pointer;">发送</button>
+        </div>
+
+        <div style="padding:9px 10px 12px;background:var(--primary-bg);flex-shrink:0;">
+            <div style="display:flex;gap:8px;">
+                <button onclick="tgFinish(currentTgRecord,false)" style="flex:1;padding:9px;font-size:12px;font-weight:600;border:none;border-radius:9px;background:#E17055;color:#fff;cursor:pointer;">⏹ 提前结束</button>
+                <button onclick="tgTogglePanel('tg-extend-row')" style="flex:1;padding:9px;font-size:12px;font-weight:600;border:none;border-radius:9px;background:#6c5ce7;color:#fff;cursor:pointer;">⏱ 延长时间</button>
             </div>
-            <button onclick="tgFinish(currentTgRecord, false)" class="ex-primary-btn" style="width:100%;padding:10px;background:#E17055;">⏹ 提前结束</button>
+            <div id="tg-extend-row" style="display:none;gap:6px;margin-top:7px;">
+                ${[5, 10, 15].map(m => `<button onclick="tgExtend(${m})" style="flex:1;padding:7px;font-size:11px;border:1px solid var(--border-color);border-radius:8px;background:var(--secondary-bg);color:var(--text-primary);cursor:pointer;">+${m} 分钟</button>`).join('')}
+            </div>
         </div>
     `);
     window.currentTgRecord = record;
+    const msgWrap = document.getElementById('tg-msgs');
+    if (msgWrap) {
+        msgWrap.innerHTML = tgRunMsgs.map(m => tgMsgHtml(m)).join('');
+        msgWrap.scrollTop = msgWrap.scrollHeight;
+    }
     update();
     if (tgInterval) clearInterval(tgInterval);
     tgInterval = setInterval(update, 1000);
 }
+function tgMsgHtml(m) {
+    const mine = m.from === 'me';
+    const t = new Date(m.time).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+    return `<div style="display:flex;justify-content:${mine ? 'flex-end' : 'flex-start'};margin-bottom:7px;">
+        <div style="max-width:78%;padding:7px 11px;border-radius:12px;font-size:12px;line-height:1.5;background:${mine ? 'var(--accent-color)' : 'var(--primary-bg)'};color:${mine ? '#fff' : 'var(--text-primary)'};box-shadow:0 1px 3px rgba(0,0,0,0.08);">
+            ${tgEsc(m.text)}
+            <div style="font-size:9px;opacity:0.65;margin-top:2px;text-align:${mine ? 'right' : 'left'};">${t}</div>
+        </div></div>`;
+}
+function tgAppendMsg(m) {
+    const wrap = document.getElementById('tg-msgs');
+    if (!wrap) return;
+    wrap.insertAdjacentHTML('beforeend', tgMsgHtml(m));
+    wrap.scrollTop = wrap.scrollHeight;
+}
+/* 发消息 + 对方概率回复 */
+window.tgSendMsg = function() {
+    const input = document.getElementById('tg-msg-input');
+    const text = input ? input.value.trim() : '';
+    if (!text) return;
+    const m = { from: 'me', text, time: Date.now() };
+    tgRunMsgs.push(m);
+    tgAppendMsg(m);
+    input.value = '';
+    if (Math.random() < 0.78) setTimeout(tgPartnerReply, 1400 + Math.random() * 3200);
+};
+function tgPartnerReply() {
+    if (!document.getElementById('tg-msgs') || !window.currentTgRecord) return;
+    const key = window.currentTgRecord.scene;
+    const pool = (TG_REPLY_POOL[key] || []).concat(TG_REPLY_GENERAL);
+    const text = pool[Math.floor(Math.random() * pool.length)];
+    const m = { from: 'partner', text, time: Date.now() };
+    tgRunMsgs.push(m);
+    tgAppendMsg(m);
+    try { if (typeof playSound === 'function') playSound('partner_message'); } catch (e) {}
+}
+/* 面板展开/收起（互斥） */
+window.tgTogglePanel = function(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const show = el.style.display === 'none';
+    document.getElementById('tg-bg-panel').style.display = 'none';
+    document.getElementById('tg-extend-row').style.display = 'none';
+    el.style.display = show ? (id === 'tg-extend-row' ? 'flex' : 'block') : 'none';
+};
+/* 背景：预设 / 上传 */
+window.tgApplyBg = function(btn, css) {
+    tgRunBg = css;
+    tgData.lastBg = css; tgSaveData();
+    const hero = document.getElementById('tg-hero');
+    if (hero) hero.style.background = css;
+    try { if (typeof showNotification === 'function') showNotification('背景已更换 🎨', 'success', 2000); } catch (e) {}
+};
+window.tgBgUpload = function(e) {
+    const f = (e.target.files || [])[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = function(ev) {
+        const css = 'url("' + ev.target.result + '") center/cover no-repeat';
+        tgApplyBg(null, css);
+    };
+    reader.readAsDataURL(f);
+    e.target.value = '';
+};
+/* 延长时间 */
+window.tgExtend = function(addMin) {
+    const r = window.currentTgRecord;
+    if (!r) return;
+    r.endAt = new Date(new Date(r.endAt).getTime() + addMin * 60000).toISOString();
+    r.minutes += addMin;
+    const idx = tgData.history.findIndex(h => h.id === r.id);
+    if (idx >= 0) tgData.history[idx] = r;
+    tgSaveData();
+    document.getElementById('tg-extend-row').style.display = 'none';
+    const tip = document.getElementById('tg-tip');
+    if (tip) tip.textContent = '好，再陪你 ' + addMin + ' 分钟 ❤️';
+    try { if (typeof showNotification === 'function') showNotification('已延长 ' + addMin + ' 分钟 ⏱', 'success', 2500); } catch (e) {}
+};
 
 function tgFinish(record, autoFinish) {
+    if (!record) { tgClose(); return; }
     if (tgInterval) { clearInterval(tgInterval); tgInterval = null; }
     record.finished = autoFinish;
     record.endAt = new Date().toISOString();
     // 累计陪伴时长（按实际陪伴分钟计）
     const actualMs = new Date(record.endAt).getTime() - new Date(record.startAt).getTime();
-    const actualMin = Math.round(actualMs / 60000);
+    const actualMin = Math.max(1, Math.round(actualMs / 60000));
     tgData.totalMinutes += actualMin;
-    // 更新历史
     const idx = tgData.history.findIndex(h => h.id === record.id);
     if (idx >= 0) tgData.history[idx] = record;
     tgSaveData();
+    window.currentTgRecord = null;
     if (typeof showNotification === 'function') {
-        showNotification(autoFinish ? `🎉 陪伴完成！${record.minutes} 分钟专注时光` : '陪伴已结束', autoFinish ? 'success' : 'info', 3500);
+        showNotification(autoFinish ? `🎉 陪伴完成！共陪伴 ${actualMin} 分钟` : `陪伴已结束 · ${actualMin} 分钟`, autoFinish ? 'success' : 'info', 3500);
     }
     if (typeof playSound === 'function') playSound('favorite');
-    // 同步到聊天（可选）
+    // 发一条消息到聊天并退出计时界面，回到聊天
     if (typeof addMessage === 'function') {
         const scene = TG_SCENES.find(s => s.key === record.scene);
-        if (scene) addMessage({ id: Date.now(), sender:'user', text:`${scene.icon} ${scene.name} · ${actualMin}分钟${autoFinish?'已完成':'已结束'}`, timestamp:new Date(), status:'sent', type:'normal' });
+        if (scene) addMessage({ id: Date.now(), sender: 'user', text: `${scene.icon} ${scene.name} · ${actualMin}分钟${autoFinish ? '已完成' : '已结束'}`, timestamp: new Date(), status: 'sent', type: 'normal' });
     }
-    tgRenderHub();
+    tgClose();
 }
 
 window.tgFinish = tgFinish;

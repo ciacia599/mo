@@ -1,56 +1,42 @@
-# 简易静态文件服务器（.NET HttpListener）
-$ErrorActionPreference = 'Stop'
-$root = $PSScriptRoot
-$port = 8765
-$url = "http://localhost:$port/"
+$root = (Get-Location).Path
+$port = 8080
 $listener = New-Object System.Net.HttpListener
-$listener.Prefixes.Add($url)
+$listener.Prefixes.Add("http://localhost:$port/")
 $listener.Start()
-Write-Host "服务器已启动: $url  (根目录: $root)" -ForegroundColor Green
-
-$mimes = @{
-    '.html' = 'text/html; charset=utf-8'
-    '.js'   = 'application/javascript; charset=utf-8'
-    '.css'  = 'text/css; charset=utf-8'
-    '.json' = 'application/json; charset=utf-8'
-    '.png'  = 'image/png'
-    '.jpg'  = 'image/jpeg'
-    '.jpeg' = 'image/jpeg'
-    '.gif'  = 'image/gif'
-    '.svg'  = 'image/svg+xml'
-    '.ico'  = 'image/x-icon'
-    '.woff' = 'font/woff'
-    '.woff2' = 'font/woff2'
-    '.ttf'  = 'font/ttf'
-    '.mp3'  = 'audio/mpeg'
-    '.map'  = 'application/json'
-}
-
+Write-Host "Serving $root on http://localhost:$port"
 while ($listener.IsListening) {
     try {
         $ctx = $listener.GetContext()
-    } catch { continue }
-    $req = $ctx.Request
-    $resp = $ctx.Response
-    $path = $req.Url.AbsolutePath
-    if ($path -eq '/') { $path = '/index.html' }
-    $filePath = Join-Path $root ($path -replace '/','\')
-    $filePath = [System.IO.Path]::GetFullPath($filePath)
-    # 防止目录穿越
-    if (-not $filePath.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) {
-        $resp.StatusCode = 403; $resp.Close(); continue
+        $req = $ctx.Request
+        $path = $req.Url.LocalPath
+        if ($path -eq '/') { $path = '/index.html' }
+        $file = Join-Path $root $path.TrimStart('/')
+        if (Test-Path $file -PathType Leaf) {
+            $ext = [System.IO.Path]::GetExtension($file).ToLower()
+            $ct = switch ($ext) {
+                '.html' { 'text/html; charset=utf-8' }
+                '.js'   { 'application/javascript; charset=utf-8' }
+                '.css'  { 'text/css; charset=utf-8' }
+                '.json' { 'application/json; charset=utf-8' }
+                '.png'  { 'image/png' }
+                '.jpg'  { 'image/jpeg' }
+                '.jpeg' { 'image/jpeg' }
+                '.gif'  { 'image/gif' }
+                '.svg'  { 'image/svg+xml' }
+                '.ico'  { 'image/x-icon' }
+                '.woff' { 'font/woff' }
+                '.woff2'{ 'font/woff2' }
+                default { 'application/octet-stream' }
+            }
+            $bytes = [System.IO.File]::ReadAllBytes($file)
+            $ctx.Response.ContentType = $ct
+            $ctx.Response.ContentLength64 = $bytes.Length
+            $ctx.Response.OutputStream.Write($bytes, 0, $bytes.Length)
+        } else {
+            $ctx.Response.StatusCode = 404
+        }
+        $ctx.Response.OutputStream.Close()
+    } catch {
+        Write-Host "Error: $_"
     }
-    if (Test-Path $filePath -PathType Leaf) {
-        $ext = [System.IO.Path]::GetExtension($filePath).ToLower()
-        $mime = if ($mimes.ContainsKey($ext)) { $mimes[$ext] } else { 'application/octet-stream' }
-        $bytes = [System.IO.File]::ReadAllBytes($filePath)
-        $resp.ContentType = $mime
-        $resp.ContentLength64 = $bytes.Length
-        $resp.OutputStream.Write($bytes, 0, $bytes.Length)
-    } else {
-        $resp.StatusCode = 404
-        $body = [System.Text.Encoding]::UTF8.GetBytes("404 Not Found: $path")
-        $resp.OutputStream.Write($body, 0, $body.Length)
-    }
-    $resp.Close()
 }
